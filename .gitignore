@@ -1,0 +1,28 @@
+# OS / editor
+.DS_Store
+Thumbs.db
+*.swp
+.idea/
+.vscode/
+
+# Node / build (for future app implementation)
+node_modules/
+dist/
+build/
+.env
+.env.local
+*.log
+
+# Python (for future migration/ETL scripts)
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Data / migration working files (never commit real operational data)
+/data/
+*.xlsx
+*.xlsb
+*.csv
+*.bak
+!docs/**/*.csv
