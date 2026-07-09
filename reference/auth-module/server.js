@@ -19,6 +19,7 @@ app.use(authMiddleware);
 app.get('/auth/me', (req, res) =>
   res.json({ user: { id: req.user.id, username: req.user.username }, perms: [...req.perms], sites: [...req.sites] })
 );
+app.use('/auth/mfa', require('./routes/mfa'));   // enrol/enable/disable 2FA (authenticated)
 app.use('/api', require('./routes/demo'));
 
 const PORT = process.env.PORT || 4100;

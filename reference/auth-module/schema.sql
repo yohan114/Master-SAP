@@ -11,6 +11,8 @@ CREATE TABLE IF NOT EXISTS sec_user (
   is_locked     INTEGER NOT NULL DEFAULT 0,
   failed_count  INTEGER NOT NULL DEFAULT 0,
   last_login_at TEXT,
+  mfa_secret    TEXT,
+  mfa_enabled   INTEGER NOT NULL DEFAULT 0,
   created_at    TEXT NOT NULL DEFAULT (datetime('now'))
 );
 CREATE TABLE IF NOT EXISTS sec_role (

@@ -24,8 +24,8 @@ Target: **one UMMS instance, one server database, one set of masters** (see `doc
 - [x] **Remove the hard‑coded password** `'E&CWorkshop'` — **done & verified**: ported into the real app (`reference/storesdb-auth-port/`), old password now returns 401. *Rotate the value anywhere else it lived.*
 - [x] Never accept credentials in query strings — login is a POST body; nothing sensitive in the URL.
 - [x] Real per‑user authentication — argon2/scrypt hashing, server‑side sessions, httpOnly cookies, rate‑limit + lockout (booted & tested end‑to‑end).
-- [ ] **MFA** for `admin` and `finance` roles. *(Owner: ___)*
-- [x] **RBAC** — enforced on **delete AND write routes** (a single `/api` guard maps POST/PUT to `STORES.PRICE`/`STORES.ISSUE`/`STORES.TRANSFER`/`STORES.WRITE`; verified 401/403/200) + a login‑gated UI. *Review the route→perm map against every route; add MFA.*
+- [x] **MFA (TOTP 2FA)** for `admin`/`finance` roles — **built & verified** in both `reference/auth-module/` and the real port (`reference/storesdb-auth-port/`): zero‑dependency RFC 6238 `auth/totp.js`, enrol/enable/disable at `/auth/mfa`, second‑factor step in login (MFA‑enabled account without a valid code → 401 `mfa:true`; valid code → 200). Smoke test **15/15**. *Enrol admin/finance at go‑live.*
+- [x] **RBAC** — enforced on **delete AND write routes** (a single `/api` guard maps POST/PUT to `STORES.PRICE`/`STORES.ISSUE`/`STORES.TRANSFER`/`STORES.WRITE`; verified 401/403/200) + a login‑gated UI. *Review the route→perm map against every route.*
 - [ ] **Site‑scoped visibility** — mechanism ready (`siteScope`, `sec_user_site`); wire once site columns are on the stores tables. *(Owner: ___)*
 
 ### Transport & secrets

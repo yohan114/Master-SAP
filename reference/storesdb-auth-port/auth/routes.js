@@ -4,6 +4,7 @@ const crypto = require('crypto');
 const rateLimit = require('express-rate-limit');
 const { get, run } = require('../db');
 const { verifyPassword } = require('./password');
+const { verifyTotp } = require('./totp');
 const { audit } = require('./audit');
 
 const router = express.Router();
@@ -22,6 +23,12 @@ router.post('/login', loginLimiter, async (req, res) => {
     }
     audit('LOGIN_FAIL', { detail: { username } });
     return res.status(401).json({ error: 'Invalid username or password.' });
+  }
+  if (user.mfa_enabled) {                                   // second factor for MFA-enabled accounts
+    if (!verifyTotp(user.mfa_secret, (req.body || {}).token)) {
+      audit('LOGIN_MFA_FAIL', { userId: user.id });
+      return res.status(401).json({ error: 'Authenticator code required or invalid.', mfa: true });
+    }
   }
   const token = crypto.randomBytes(32).toString('hex');
   const expires = new Date(Date.now() + SESSION_MS).toISOString();
