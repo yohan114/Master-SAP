@@ -138,7 +138,7 @@ cost_job_summary
   material_cost  <- sum(mv_stock_ledger OUT where jobcard_id)  [ISS parts + LUB oil]
   labour_cost    <- sum(tx_job_labour hours x md_labour_rate as-of date)
   general_cost   <- sum(general items / consumables issued to job)
-  outside_cost   <- sum(tx_job_outside_repair priced amounts)
+  outside_repair_cost   <- sum(tx_job_outside_repair priced amounts)
   ------------------------------------------------------------------
   total_job_cost = material + labour + general + outside
 cost_variance    = estimated vs actual (per element + total)
@@ -173,8 +173,8 @@ One engine drives every approval in UMMS — no module hard-codes its own sign-o
 | `PO_APPROVAL` | value-threshold approver(s) | `tx_po` |
 | `ADJUSTMENT_APPROVAL` | stores manager | `tx_adjustment` |
 | `RETURN_APPROVAL` | stores manager | `tx_return` |
-| `BATTERY_SCRAP_APPROVAL` | workshop mgr → OM | `tx_battery_return` (scrap/warranty) |
-| `PRICE_CONFIRM_APPROVAL` | stores/finance | `md_price` / `inv_pending_price` |
+| `BATTERY_RETURN_APPROVAL` | workshop mgr → OM | `tx_battery_return` (scrap/warranty) |
+| `PRICE_CONFIRM` | stores/finance | `md_price` / `inv_pending_price` |
 | `MRQ_APPROVAL` | supervisor | `tx_job_material_req` |
 
 **Approval action vocabulary (`APR`):** `PENDING`, `APPROVED`, `REJECTED`, `RETURNED`,
@@ -200,7 +200,7 @@ One engine drives every approval in UMMS — no module hard-codes its own sign-o
 | Workshop — JC | `JC` | `md_asset`, `md_location`, `md_project` | — (drives all above via child docs) | `cost_job_summary` container |
 | Workshop — MRQ | `MRQ` | `md_item`, `md_location` | `inv_reservation` on approval | — |
 | Workshop — LAB | `LAB` | `md_employee`, `md_labour_rate` | — | → `labour_cost` |
-| Workshop — OSR | `OSR` | `md_supplier(SUBCONTRACTOR)` | — | → `outside_cost` |
+| Workshop — OSR | `OSR` | `md_supplier(SUBCONTRACTOR)` | — | → `outside_repair_cost` |
 | Approvals — apr | — | `md_approval_role`, `sec_user`, `sec_user_site` | — | Gates posting/closure |
 
 **Single truth restated:** every stock-affecting line — regardless of module — writes exactly one

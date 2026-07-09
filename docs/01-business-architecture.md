@@ -136,7 +136,7 @@ one `md_asset`; four supplier lists → one `md_supplier`; four ways of counting
 | `tx_lube_issue` (LUB) | `asset_id`, `meter_reading`, `jobcard_id?` | `md_asset`, `mv_stock_ledger` OUT | Oil traceable to vehicle + meter; optionally to a job |
 | `tx_battery_issue` (BAT) | `battery_id`, `asset_id` | `md_battery`, `hist_battery_event`, `md_asset` | Serial battery punched onto a vehicle |
 | `tx_job_labour` (LAB) | `jobcard_id`, `employee_id`, `md_labour_rate` | `cost_job_summary.labour_cost` | Technician hours × effective rate |
-| `tx_job_outside_repair` (OSR) | `jobcard_id`, `supplier_id` (SUBCONTRACTOR) | `cost_job_summary.outside_cost` | Subcontract repair cost |
+| `tx_job_outside_repair` (OSR) | `jobcard_id`, `supplier_id` (SUBCONTRACTOR) | `cost_job_summary.outside_repair_cost` | Subcontract repair cost |
 | `tx_grn` (GRN) | `item_id`, `supplier_id`, `grn_date`, `unit_price` | `md_price_history`, `inv_stock_balance`, `inv_pending_price` | Receipt sets/queues price, recomputes MWAC |
 
 ---
@@ -159,7 +159,7 @@ one `md_asset`; four supplier lists → one `md_supplier`; four ways of counting
 | 9 | Costing (auto) | Oil value to job (issue carried `jobcard_id`) | Lube cost folded into material | `cost_job_summary.material_cost` += oil value | — | `cost_job_line`, `cost_job_summary` |
 | 10 | Technician / stores | Failed battery `BAT-SN-77341` returned, new serial punched onto vehicle | `BRT-CMB-26-000006` (return failed) + `BAT-CMB-26-000077` (issue new) | New battery valued from `md_battery` acquisition cost; battery events logged | old battery `IN_SERVICE → RETURNED → UNDER_WARRANTY_CLAIM`; new `IN_STOCK → ISSUED → IN_SERVICE` | `tx_battery_return`, `tx_battery_issue`, `md_battery`, `hist_battery_event`, `md_asset` |
 | 11 | Workshop supervisor | Hydraulic pump sent to outside specialist | `OSR-CMB-26-000031` raised to SUBCONTRACTOR supplier | Outside cost accrued | `IN_PROGRESS → AWAITING_OUTSIDE_REPAIR` | `tx_job_outside_repair`, `md_supplier` |
-| 12 | Supplier / supervisor | Repaired pump returned, invoice priced | OSR closed with amount | `cost_job_summary.outside_cost` += invoice | `AWAITING_OUTSIDE_REPAIR → IN_PROGRESS` | `tx_job_outside_repair`, `cost_job_line` |
+| 12 | Supplier / supervisor | Repaired pump returned, invoice priced | OSR closed with amount | `cost_job_summary.outside_repair_cost` += invoice | `AWAITING_OUTSIDE_REPAIR → IN_PROGRESS` | `tx_job_outside_repair`, `cost_job_line` |
 | 13 | Technician | Log labour: 6.5 h across 2 technicians | `LAB-CMB-26-000771` captured; hours × `md_labour_rate` | `cost_job_summary.labour_cost` += labour | — | `tx_job_labour`, `md_labour_rate`, `md_employee`, `cost_job_line` |
 | 14 | Workshop supervisor | Mark all tasks done | Work log finalized | — | `IN_PROGRESS → WORK_COMPLETED` | `tx_job_progress`, `txl_jobcard_task` |
 | 15 | Costing | Verify no `inv_pending_price` rows for job; roll up totals | `total_job_cost = material + labour + general + outside`; variance computed | `cost_job_summary.total_job_cost` finalized; `cost_variance` written | `WORK_COMPLETED → PENDING_COSTING → PENDING_CLOSURE` | `cost_job_summary`, `cost_variance`, `inv_pending_price` |
