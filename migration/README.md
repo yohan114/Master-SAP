@@ -59,8 +59,31 @@ snapshot. **Verified end-to-end on PostgreSQL 16** (loads with `ON_ERROR_STOP`, 
 | negative on-hand items | 5 (flagged for review) |
 | orphan ledger→item FKs | 0 |
 
-Job cards, labour, lubricant and battery load into their tables the same way (masters first,
-then documents, then ledger) — this loader proves the pattern on the largest/most complex slice.
+### Unified load — the whole operation in one DB (`load_all_to_postgres.py`)
+
+`load_all_to_postgres.py` loads **all four sources into one UMMS database** and proves the
+cross-module job-cost chain in SQL: stores masters + ledger, the **unified fleet** (`md_asset`),
+technicians + grade rates (`md_employee` / `md_labour_rate`), job cards (`tx_jobcard`), daily
+progress + split labour (`tx_job_progress` / `tx_job_labour`), and the `cost_job_summary` roll-up.
+
+**Verified on PostgreSQL 16** (loads clean, **0 orphan FKs** across jobcard→asset→labour→employee→cost):
+
+| | Loaded |
+|---|---|
+| items / suppliers / **unified assets** / technicians | 2,836 / 301 / **1,053** / 34 |
+| job cards / labour lines / cost roll-ups | 3,028 / 1,375 / 217 |
+| stock ledger movements | 3,891 |
+| total stock value / total labour cost | LKR 12,194,070.42 / **LKR 2,985,875.00** |
+
+The per-job cost is now a query, e.g.:
+```sql
+SELECT j.jobcard_no, a.asset_no, cs.labour_cost, cs.total_job_cost
+FROM cost_job_summary cs
+JOIN tx_jobcard j USING (jobcard_id)
+JOIN md_asset  a ON a.asset_id = j.asset_id
+ORDER BY cs.total_job_cost DESC;   -- top job: 2026/3/R/194 -> LKR 185,675
+```
+Lubricant issues and the battery serial register load the same way (masters → documents → ledger).
 
 ## Migration policy (applied by every ETL)
 - **No-drop:** every source row loads — merged, linked, or flagged. Missing vehicle → general
