@@ -20,13 +20,13 @@ Target: **one UMMS instance, one server database, one set of masters** (see `doc
 
 ## 🔴 P0 — Go‑live blockers
 
-### Security & access — `docs/07`, `docs/13`
-- [ ] **Remove the hard‑coded password** `'E&CWorkshop'` from `server.js` and rotate it. *(Owner: ___)*
-- [ ] Never accept credentials/passwords in query strings or logs. *(Owner: ___)*
-- [ ] Real per‑user authentication: unique accounts, **argon2/bcrypt** hashing, server‑side sessions or short‑lived JWT, account lockout, password policy. *(Owner: ___)*
+### Security & access — `docs/07`, `docs/13`, `reference/storesdb-auth-port/`
+- [x] **Remove the hard‑coded password** `'E&CWorkshop'` — **done & verified**: ported into the real app (`reference/storesdb-auth-port/`), old password now returns 401. *Rotate the value anywhere else it lived.*
+- [x] Never accept credentials in query strings — login is a POST body; nothing sensitive in the URL.
+- [x] Real per‑user authentication — argon2/scrypt hashing, server‑side sessions, httpOnly cookies, rate‑limit + lockout (booted & tested end‑to‑end).
 - [ ] **MFA** for `admin` and `finance` roles. *(Owner: ___)*
-- [ ] **RBAC** enforced on every write + report per the role matrix (storekeeper / receiving / pricing / transport / TM / OM / workshop / technician / finance / admin). *(Owner: ___)*
-- [ ] **Site‑scoped visibility** — normal site users see only their `site_id` data (`sec_user_site`). *(Owner: ___)*
+- [~] **RBAC** — enforced on the delete routes (`requirePerm('STORES.DELETE')`, verified 403/200); *extend the same pattern to POST/PUT (STORES.PRICE, STORES.CREATE …).* *(Owner: ___)*
+- [ ] **Site‑scoped visibility** — mechanism ready (`siteScope`, `sec_user_site`); wire once site columns are on the stores tables. *(Owner: ___)*
 
 ### Transport & secrets
 - [~] **HTTPS/TLS** everywhere via reverse proxy — **config provided** (`ops/proxy/nginx-umms.conf`: TLS1.2/1.3, HSTS, CSP, redirect); *deploy + install certs.* *(Owner: ___)*
