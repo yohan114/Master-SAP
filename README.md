@@ -53,6 +53,7 @@ one module correctly affects stock, costing, and reporting everywhere else.
 **UI prototype:** [`ui/prototype.html`](ui/prototype.html) — an interactive command‑center mockup.
 **Production gate:** [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md) — the P0/P1/P2 go‑live checklist.
 **Migration:** [`migration/`](migration/) — four tested legacy‑import ETLs + costing engine + playbook.
+**Reference auth module:** [`reference/auth-module/`](reference/auth-module/) — runnable Express auth + RBAC + site‑scoping (10/10 smoke tests pass) that replaces the legacy hard‑coded password.
 
 ---
 
