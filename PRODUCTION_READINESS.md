@@ -25,7 +25,7 @@ Target: **one UMMS instance, one server database, one set of masters** (see `doc
 - [x] Never accept credentials in query strings — login is a POST body; nothing sensitive in the URL.
 - [x] Real per‑user authentication — argon2/scrypt hashing, server‑side sessions, httpOnly cookies, rate‑limit + lockout (booted & tested end‑to‑end).
 - [ ] **MFA** for `admin` and `finance` roles. *(Owner: ___)*
-- [~] **RBAC** — enforced on the delete routes (`requirePerm('STORES.DELETE')`, verified 403/200); *extend the same pattern to POST/PUT (STORES.PRICE, STORES.CREATE …).* *(Owner: ___)*
+- [x] **RBAC** — enforced on **delete AND write routes** (a single `/api` guard maps POST/PUT to `STORES.PRICE`/`STORES.ISSUE`/`STORES.TRANSFER`/`STORES.WRITE`; verified 401/403/200) + a login‑gated UI. *Review the route→perm map against every route; add MFA.*
 - [ ] **Site‑scoped visibility** — mechanism ready (`siteScope`, `sec_user_site`); wire once site columns are on the stores tables. *(Owner: ___)*
 
 ### Transport & secrets

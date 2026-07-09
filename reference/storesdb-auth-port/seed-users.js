@@ -4,11 +4,11 @@ require('./auth/schema').ensure();
 const { get, run } = require('./db');
 const { hashPassword } = require('./auth/password');
 
-const PERMS = ['STORES.READ', 'STORES.CREATE', 'STORES.ISSUE', 'STORES.PRICE', 'STORES.DELETE', 'ADMIN.ALL'];
+const PERMS = ['STORES.READ', 'STORES.WRITE', 'STORES.ISSUE', 'STORES.TRANSFER', 'STORES.PRICE', 'STORES.DELETE', 'ADMIN.ALL'];
 const ROLES = {
-  system_admin:  ['ADMIN.ALL'],
-  store_keeper:  ['STORES.READ', 'STORES.CREATE', 'STORES.ISSUE'],   // note: cannot DELETE or PRICE
-  pricing_officer: ['STORES.READ', 'STORES.PRICE'],
+  system_admin:    ['ADMIN.ALL'],
+  store_keeper:    ['STORES.READ', 'STORES.WRITE', 'STORES.ISSUE', 'STORES.TRANSFER'], // create/receive/issue/transfer; NOT price or delete
+  pricing_officer: ['STORES.READ', 'STORES.PRICE'],                                    // pricing only
 };
 const USERS = [
   ['admin',   'ChangeMe@Admin1', 'System Admin',   'system_admin'],

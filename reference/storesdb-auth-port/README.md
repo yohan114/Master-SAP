@@ -6,14 +6,29 @@ RBAC, and an audit trail**. Implements `docs/13-auth-rbac-design.md` inside the 
 
 ## Verified (booted the real ported `server.js` on `node:sqlite`)
 
+**Auth + delete routes**
+
 | Check | Result |
 |---|---|
 | Old hard‑coded password header, no session → DELETE | **401** (no longer works) |
-| DELETE with no auth | **401** |
-| Login admin / keeper | **200** |
-| Login wrong password | **401** |
-| Store keeper DELETE (no `STORES.DELETE`) | **403** |
-| Admin DELETE (has `STORES.DELETE`) | **200** |
+| DELETE with no auth · login admin/keeper · wrong password | **401 · 200 · 401** |
+| Store keeper DELETE (no `STORES.DELETE`) → admin DELETE | **403 → 200** |
+
+**Write routes (single `/api` mutation guard, GET reads open, DELETE per‑route)**
+
+| Check | Result |
+|---|---|
+| Unauth `PUT /api/items/1` | **401** |
+| Store keeper `PUT /api/items/1` (`STORES.WRITE`) · `POST /api/transfers` (`STORES.TRANSFER`) | **allowed** |
+| Store keeper `PUT /api/receipts/1` (pricing, no `STORES.PRICE`) | **403** |
+| Pricing officer `PUT /api/receipts/1` (`STORES.PRICE`) → `PUT /api/items/1` (no write) | **200 → 403** |
+
+**Login page + UI gate**
+
+| Check | Result |
+|---|---|
+| `GET /` and `/item_tracker.html` unauthenticated | **302 → `/login.html`** |
+| `GET /item_tracker.html` with valid session | **200** |
 | `audit_log` records LOGIN_OK / LOGIN_FAIL / AUTHZ_DENY | ✅ |
 
 ## Files
@@ -26,28 +41,31 @@ RBAC, and an audit trail**. Implements `docs/13-auth-rbac-design.md` inside the 
 | `auth/schema.js` | `ensure()` creates the `sec_*` + `audit_log` tables in `inventory.db` |
 | `auth/routes.js` | `POST /auth/login` (rate‑limited + lockout) · `POST /auth/logout` |
 | `seed-users.js` | roles/permissions + first admin/keeper/pricing users |
-| `server.js.patch` | the exact 4‑part edit to `server.js` |
+| `login.html` | minimal styled login page (posts to `/auth/login`, redirects to the tracker) |
+| `server.js.patch` | the exact edits: auth wiring, `/api` write guard, delete‑route gating, login gate |
 
 ## Apply it
 ```bash
 cd storesdb
 cp -r /path/to/reference/storesdb-auth-port/auth .        # drop in auth/
-cp    /path/to/reference/storesdb-auth-port/seed-users.js .
-git apply /path/to/reference/storesdb-auth-port/server.js.patch   # or apply the 4 edits by hand
+cp    /path/to/reference/storesdb-auth-port/seed-users.js /path/to/reference/storesdb-auth-port/login.html .
+git apply /path/to/reference/storesdb-auth-port/server.js.patch   # or apply the edits by hand
 npm install cookie-parser express-rate-limit               # (+ argon2 for prod-grade hashing)
 node seed-users.js                                         # creates sec_* tables + users
 # restart the app
 ```
 
-The patch does four things: adds `cookie-parser` + the auth wiring after `express.json`, mounts
-`/auth`, **deletes `verifyDeletePassword` and the `'E&CWorkshop'` constant**, and swaps every
-`app.delete(..., verifyDeletePassword, ...)` for `app.delete(..., ...requireAuthPerm('STORES.DELETE'), ...)`.
+The patch: adds `cookie-parser` + auth wiring after `express.json`; mounts `/auth`; **deletes
+`verifyDeletePassword` and the `'E&CWorkshop'` constant** and gates all 6 delete routes with
+`requirePerm('STORES.DELETE')`; adds a single **`/api` write guard** (POST/PUT/PATCH → auth +
+`STORES.PRICE` / `STORES.ISSUE` / `STORES.TRANSFER` / `STORES.WRITE` by route, GET reads left open);
+and gates the tracker UI behind login (unauthenticated → `/login.html`).
 
 ## Before go‑live
 - **Change the seeded passwords** immediately (they're placeholders) and force first‑login change.
 - Set `NODE_ENV=production` so session cookies are `Secure`; terminate TLS at the proxy
   (`ops/proxy/nginx-umms.conf`) and `app.set('trust proxy', 1)`.
-- Extend the same `authMiddleware` + `requirePerm(...)` pattern to the **POST/PUT** routes
-  (e.g. `STORES.PRICE` on the GRN pricing route, `STORES.CREATE` on inserts) — deletes are done
-  here because they were the only thing the legacy password guarded.
+- Review the route→permission mapping in `permForMutation()` against your exact routes, and add
+  MFA for admin/finance. Site‑scoping (`siteScope`) is ready to wire once the stores tables carry a
+  `site_id`.
 - For prod‑grade hashing run `npm install argon2` (the code auto‑detects and uses it).

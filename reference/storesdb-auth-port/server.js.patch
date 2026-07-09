@@ -1,6 +1,6 @@
 --- server.orig.js	2026-07-09 14:38:18.825564949 +0000
-+++ server.js	2026-07-09 14:39:42.483236345 +0000
-@@ -26,6 +26,16 @@
++++ server.js	2026-07-09 14:48:30.273815382 +0000
+@@ -26,13 +26,43 @@
  
  app.use(express.json({ limit: '100mb' }));
  
@@ -14,10 +14,38 @@
 +const requireAuthPerm = (code) => [authMiddleware, requirePerm(code)];
 +app.use('/auth', authRoutes);
 +
++// [UMMS] gate all /api writes with RBAC (GET reads stay open; DELETE gated per-route above)
++function permForMutation(req) {
++  const p = (req.baseUrl || '') + req.path;
++  if (/^\/api\/receipts\//.test(p)) return 'STORES.PRICE';   // updating a receipt = pricing / GRN
++  if (/^\/api\/issues/.test(p))      return 'STORES.ISSUE';
++  if (/^\/api\/transfers/.test(p))   return 'STORES.TRANSFER';
++  return 'STORES.WRITE';                                        // create/update items, batteries, general items, imports
++}
++app.use('/api', (req, res, next) => {
++  const m = req.method;
++  if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS' || m === 'DELETE') return next();
++  authMiddleware(req, res, () => requirePerm(permForMutation(req))(req, res, next));
++});
++// [UMMS] serve the tracker UI only to authenticated users
++function isAuthed(req) {
++  const t = req.cookies && req.cookies.umms_sid;
++  return !!(t && dbApi.get('SELECT 1 AS ok FROM sessions WHERE token=? AND expires_at>?', [t, new Date().toISOString()]));
++}
++app.get('/item_tracker.html', (req, res, next) => (isAuthed(req) ? next() : res.redirect('/login.html')));
++
  // Disable caching for API routes to ensure network clients always get fresh data
  app.use('/api', (req, res, next) => {
      res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-@@ -175,17 +185,10 @@
+     next();
+ });
+ app.use(express.static(__dirname));
+-app.get('/', (req, res) => res.redirect('/item_tracker.html'));
++app.get('/', (req, res) => res.redirect(isAuthed(req) ? '/item_tracker.html' : '/login.html'));
+ 
+ // --- helpers ----------------------------------------------------------------
+ const s = (v) => (v === null || v === undefined) ? '' : String(v);
+@@ -175,17 +205,10 @@
      }
  });
  
@@ -37,7 +65,7 @@
      try {
          const id = parseInt(req.params.id);
          dbApi.transaction(() => {
-@@ -249,7 +252,7 @@
+@@ -249,7 +272,7 @@
  });
  
  // 7. DELETE /api/receipts/:id
@@ -46,7 +74,7 @@
      try {
          dbApi.run(`DELETE FROM receipts WHERE id=?`, [parseInt(req.params.id)]);
          res.json({ success: true });
-@@ -326,7 +329,7 @@
+@@ -326,7 +349,7 @@
      }
  });
  
@@ -55,7 +83,7 @@
      try {
          dbApi.run(`DELETE FROM issues WHERE id=?`, [parseInt(req.params.id)]);
          res.json({ success: true });
-@@ -618,7 +621,7 @@
+@@ -618,7 +641,7 @@
      }
  });
  
@@ -64,7 +92,7 @@
      try {
          const id = parseInt(req.params.id);
          dbApi.transaction(() => {
-@@ -1389,7 +1392,7 @@
+@@ -1389,7 +1412,7 @@
      }
  });
  
@@ -73,7 +101,7 @@
      try {
          const id = parseInt(req.params.id);
          dbApi.run(`DELETE FROM material_transfers WHERE id = ?`, [id]);
-@@ -1601,7 +1604,7 @@
+@@ -1601,7 +1624,7 @@
      }
  });
  
