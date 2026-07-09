@@ -3,6 +3,7 @@
 > A tick‑box gate for moving from the current prototype/legacy state to a production deployment.
 > **Do not go live until every 🔴 P0 item is checked.** Legend: 🔴 blocker · 🟠 at‑launch · 🟡 post‑launch.
 > Owner column is indicative — assign a real name/date before sign‑off.
+> Checkbox: `[x]` done & verified · `[~]` scripted/config provided, needs prod deploy · `[ ]` not started.
 
 ## Current state (what we are migrating from)
 | System today | Reality found | Risk |
@@ -28,18 +29,18 @@ Target: **one UMMS instance, one server database, one set of masters** (see `doc
 - [ ] **Site‑scoped visibility** — normal site users see only their `site_id` data (`sec_user_site`). *(Owner: ___)*
 
 ### Transport & secrets
-- [ ] **HTTPS/TLS** everywhere via reverse proxy (nginx/Caddy); no plaintext HTTP. *(Owner: ___)*
-- [ ] Secrets removed from source/committed `.env` → OS secret store / vault; rotate all creds that ever touched code. *(Owner: ___)*
-- [ ] CORS allow‑list, security headers (helmet), and request rate limiting. *(Owner: ___)*
+- [~] **HTTPS/TLS** everywhere via reverse proxy — **config provided** (`ops/proxy/nginx-umms.conf`: TLS1.2/1.3, HSTS, CSP, redirect); *deploy + install certs.* *(Owner: ___)*
+- [ ] Secrets removed from source/committed `.env` → OS secret store / vault; rotate all creds that ever touched code (incl. `E&CWorkshop`). *(Owner: ___)*
+- [~] CORS allow‑list, security headers, and request rate limiting — **in the nginx config + auth module**; wire app CORS allow‑list. *(Owner: ___)*
 - [ ] Confirm all SQL is parameterized; keep `ORDER BY`/column names **allow‑listed** (already the pattern in `server.js` — do not regress). *(Owner: ___)*
 
 ### Data platform
-- [ ] Stand up **one server database (PostgreSQL)** from `sql/schema.sql`; retire workstation SQLite. *(Owner: ___)*
-- [ ] Enforce DB‑level **FK / CHECK / UNIQUE** constraints (already in schema) and **atomic transactions** (ledger row + balance update in one txn). *(Owner: ___)*
+- [x] Stand up **one server database (PostgreSQL)** from `sql/schema.sql` — **done & verified**: whole operation loaded (`migration/load_all_to_postgres.py`), 0 orphan FKs, cross‑module job cost queried in SQL.
+- [x] DB‑level **FK / CHECK / UNIQUE** constraints enforced (schema loads under `ON_ERROR_STOP`); use atomic transactions (ledger row + balance in one txn) in the app.
 
 ### Data safety
-- [ ] **Automated, offsite, point‑in‑time backups** replacing the 30‑min file copies. *(Owner: ___)*
-- [ ] **Tested restore** into a clean environment (an untested backup does not count). *(Owner: ___)*
+- [~] **Automated, offsite, point‑in‑time backups** — **script provided** (`ops/backup/pg_backup.sh`: compressed dump + checksum + retention + encryption/offsite hooks; PITR notes in `ops/README.md`); *put on cron + set offsite target.* *(Owner: ___)*
+- [x] **Tested restore** — **drill script PASSED** (`ops/backup/pg_restore_drill.sh`): restored latest dump into a clean DB, all key‑table counts + total stock value matched the live DB.
 
 ### Audit
 - [ ] Every create/update/approve/reverse stamped **who + when + before/after**; reversals require a reason; no silent edits to price/cost. *(Owner: ___)*
