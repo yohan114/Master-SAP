@@ -47,9 +47,12 @@ one module correctly affects stock, costing, and reporting everywhere else.
 | 10 | [Reports & Documents](docs/10-reports-documents.md) | Report catalog + printable document layouts (GRN, job costing sheet, etc.). |
 | 11 | [Integration & Future‑Readiness](docs/11-integration.md) | Excel, barcode/QR, attachments, notifications, API, BI, optional SAP. |
 | 12 | [Roadmap, Appendices & Risks](docs/12-roadmap-appendices-risks.md) | Phase plan, menu tree, master hierarchy, numbering, alert list, MVP vs advanced, risk register. |
+| 13 | [Auth & RBAC Design](docs/13-auth-rbac-design.md) | Login, password hashing, sessions, permission middleware, site scoping — replaces the legacy hard‑coded password. |
 
 **Reference SQL:** [`sql/schema.sql`](sql/schema.sql) — PostgreSQL DDL for the core tables.
 **UI prototype:** [`ui/prototype.html`](ui/prototype.html) — an interactive command‑center mockup.
+**Production gate:** [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md) — the P0/P1/P2 go‑live checklist.
+**Migration:** [`migration/`](migration/) — four tested legacy‑import ETLs + costing engine + playbook.
 
 ---
 

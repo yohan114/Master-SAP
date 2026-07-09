@@ -21,8 +21,14 @@ venv/
 
 # Data / migration working files (never commit real operational data)
 /data/
+migration/data/
+out/
+jobs_costing.json
 *.xlsx
 *.xlsb
 *.csv
 *.bak
+*.db
+*.sqlite
+*.sqlite3
 !docs/**/*.csv
