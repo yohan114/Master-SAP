@@ -35,6 +35,33 @@ python3 migration/job_costing.py    # writes jobs_costing.json
   normalized registration (overlaps confirm one fleet).
 - **Items:** 2,716 (stores) + 21 (oil lube) → **2,730** (7 lube overlaps merged).
 
+## Loading into the production PostgreSQL schema (verified)
+
+`load_stores_to_postgres.py` reads the storesdb SQLite export and emits one self-contained SQL file
+(bootstrap + masters + ledger + balances) that loads into `sql/schema.sql`:
+
+```bash
+python3 migration/load_stores_to_postgres.py data/inventory.db build/umms_load.sql
+psql -d umms -v ON_ERROR_STOP=1 -f sql/schema.sql
+psql -d umms -v ON_ERROR_STOP=1 -f build/umms_load.sql
+```
+
+It builds `md_uom / md_item_category / md_supplier / md_item / md_asset`, reconstructs the
+append-only `mv_stock_ledger` with running Moving-Average Cost, and the `inv_stock_balance`
+snapshot. **Verified end-to-end on PostgreSQL 16** (loads with `ON_ERROR_STOP`, 0 orphan FKs):
+
+| Check | Result |
+|---|---|
+| items / suppliers / assets | 2,836 / 301 / 808 |
+| ledger movements | 3,891 (IN 3,278 · OUT 547 · ADJ_IN 65 · RET_OUT 1) |
+| **total stock value** | **LKR 12,194,070.42** (`SUM(inv_stock_balance.stock_value)`) |
+| pending-price movements | 1,510 |
+| negative on-hand items | 5 (flagged for review) |
+| orphan ledger→item FKs | 0 |
+
+Job cards, labour, lubricant and battery load into their tables the same way (masters first,
+then documents, then ledger) — this loader proves the pattern on the largest/most complex slice.
+
 ## Migration policy (applied by every ETL)
 - **No-drop:** every source row loads — merged, linked, or flagged. Missing vehicle → general
   placeholder asset. Rate-less mechanic → `RATE_PENDING`. Unpriced receipt → `inv_pending_price`.
