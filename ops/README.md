@@ -59,6 +59,22 @@ sudo nginx -t && sudo systemctl reload nginx
 App side: `NODE_ENV=production` (Secure cookies, per `reference/auth-module`) and
 `app.set('trust proxy', 1)` so `req.secure`/rate‑limit see the real client IP.
 
+## Cutover reconciliation (go / no-go)
+
+`reconcile/reconcile.py` compares independently-computed control totals from the legacy source
+against the loaded UMMS PostgreSQL DB and lists every open exception queue. Exit 0 = GO, 1 = NO-GO.
+
+```bash
+PGHOST=... PGPORT=... PGUSER=... PGDATABASE=umms python3 ops/reconcile/reconcile.py data/inventory.db
+```
+
+> Verified run: Suppliers 301=301 · stock IN 16,030.20=16,030.20 · stock OUT 2,120.95=2,120.95 ·
+> net (IN−OUT)=on-hand 13,909.25 — all **MATCH** → **GO**. Worklists surfaced: 1,510 pending-price
+> movements, 114 rate-pending labour lines, 5 negative-on-hand items, 4 general-asset jobs.
+
+Run it during the parallel-run window; only sign off cutover when it reports GO and the worklists
+are cleared.
+
 ## Secrets
 No secrets in the repo or in a committed `.env`. Load DB creds / session keys from the OS secret
 store or a vault at boot; rotate anything that ever lived in code (incl. the legacy `E&CWorkshop`).

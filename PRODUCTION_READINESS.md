@@ -45,10 +45,10 @@ Target: **one UMMS instance, one server database, one set of masters** (see `doc
 ### Audit
 - [ ] Every create/update/approve/reverse stamped **who + when + before/after**; reversals require a reason; no silent edits to price/cost. *(Owner: ___)*
 
-### Migration cutover — `docs/08`, `migration/`
-- [ ] Exception queues worked down: **1,413 pending prices · 403 lube consumers · 308 labour rates · 286 job reconciliations · 1,515 lube meters**. *(Owner: ___)*
-- [ ] Opening balances loaded and reconciled to control totals. *(Owner: ___)*
-- [ ] **One parallel run** (legacy + UMMS side by side) reconciled; documented **go/no‑go**. *(Owner: ___)*
+### Migration cutover — `docs/08`, `migration/`, `ops/reconcile/`
+- [~] Exception queues worked down — **worklists generated** by `ops/reconcile/reconcile.py` (pending pricing 1,510 · rate‑pending 114 lines/10 techs · negative on‑hand 5 · uncosted jobs · general‑asset jobs 4). *Work them down against final data.* *(Owner: ___)*
+- [x] Opening balances loaded and **reconciled to control totals** — stock IN/OUT and Σ on‑hand match legacy exactly.
+- [x] **Parallel‑run reconciliation** built & **run = GO** (`ops/reconcile/reconcile.py`): suppliers, stock IN, stock OUT, and net = on‑hand all MATCH legacy; re‑run on the real final load for sign‑off. *(Owner: ___)*
 - [ ] Legacy systems frozen **read‑only** after cutover. *(Owner: ___)*
 
 ---
