@@ -41,17 +41,27 @@ RBAC, and an audit trail**. Implements `docs/13-auth-rbac-design.md` inside the 
 | Non‑MFA `keeper` login (unaffected) | **200** |
 
 **Site‑scoped visibility** — proved end‑to‑end on the real `inventory.db` (4000 items, 299 issues,
-37 batteries, 93 transfers, 78 general items) with 10/4/3/2/5 rows moved to a second site:
+37 batteries, 93 transfers, 78 general items) with 10/4/3/2/5 rows moved to a second site. **Every
+read is scoped** — list views, single‑record `/:id` lookups, dropdowns, and the dashboard/aggregate
+endpoints:
 
 | Check | Result |
 |---|---|
-| Unauthenticated `GET /api/items`, `/api/batteries` (reads now require a session) | **401** |
+| Unauthenticated `GET /api/*` reads (reads now require a session) | **401** |
 | `admin` (all sites) sees **totals** — items 4000 · issues 299 · batteries 37 · transfers 93 · general 78 | ✅ |
 | site‑1 `keeper` sees **only site 1** — 3990 · 295 · 34 · 91 · 73 | ✅ |
 | site‑2 keeper sees **only site 2** — 10 · 4 · 3 · 2 · 5 | ✅ |
-| Both the paginated (`total`) and unpaginated (array) `/api/items` paths are scoped | ✅ |
+| Both paginated (`total`) and unpaginated (array) list paths scoped | ✅ |
+| **Dashboards/aggregates** scoped — `sidebar-stats` totalItems 10 · totalIssues 4, `battery-stats` ≤3, `transfer-stats` 2, `general-items/stats` 5, `all-vehicles` 10 (vs 812) for the site‑2 keeper | ✅ |
+| Single‑record `/api/{batteries,transfers,general-items}/:id` return **404** across sites | ✅ |
+| No `/api/*` read returns a 500; delete‑gating, write‑RBAC and the login gate still hold | ✅ |
 
-*(20/20 assertions pass — the full run is reproducible with the two‑site test in this README's notes.)*
+*(All assertions pass — 20/20 core isolation + regression, 29/29 dashboard/aggregate sweep.)*
+
+> While wiring the scope I also fixed a **pre‑existing legacy bug**: `/api/inventory` had an escaped
+> template (`\${cte}`/`\${whereSql}`/`\${sortCol}`) that emitted literal `${cte}` into the SQL, so the
+> stock view always 500'd (`unrecognized token "$"`). Unescaping it makes the endpoint work — and it's
+> now site‑scoped like the rest.
 
 ## Files
 | File | Purpose |
@@ -92,13 +102,13 @@ site(s); and gates the tracker UI behind login (unauthenticated → `/login.html
 - Set `NODE_ENV=production` so session cookies are `Secure`; terminate TLS at the proxy
   (`ops/proxy/nginx-umms.conf`) and `app.set('trust proxy', 1)`.
 - Review the route→permission mapping in `permForMutation()` against your exact routes.
-- **Site‑scoping is wired**: `schema.js` adds `site_id` to the stores tables (existing rows →
-  `HOME_SITE_ID`, default 1), and the core list reads filter by the user's `sec_user_site`
-  assignment (admins / `READ.ALL_SITES` see everything). Give each real site an id, assign keepers
-  with `INSERT INTO sec_user_site(user_id, location_id)`, and set `site_id` on new rows as you create
-  them. The **dashboard/aggregate** endpoints (`/api/dashboard/*`, `/api/sidebar-stats`,
-  `/api/inventory`, `*/stats`) still report all‑site figures — apply the same one‑line `scopeWhere(req)`
-  splice to each before exposing them to site‑restricted users.
+- **Site‑scoping is wired across every read**: `schema.js` adds `site_id` to the stores tables
+  (existing rows → `HOME_SITE_ID`, default 1; child rows inherit their parent's site), and all reads —
+  lists, single‑record `/:id` lookups, dropdowns, and the dashboard/aggregate endpoints
+  (`/api/dashboard/*`, `/api/sidebar-stats`, `/api/inventory`, `*/stats`) — filter by the user's
+  `sec_user_site` assignment (admins / `READ.ALL_SITES` see everything). Give each real site an id,
+  assign keepers with `INSERT INTO sec_user_site(user_id, location_id)`, and set `site_id` on new rows
+  as you create them (the write routes should stamp the creator's site — a natural follow‑on).
 - **MFA is built in** (`auth/totp.js`; `login` enforces the second factor when `mfa_enabled=1`).
   `schema.js` adds the `mfa_secret`/`mfa_enabled` columns automatically. Enrol admin/finance at
   go‑live: set a secret, have them scan the `otpauth://` URI, then flip `mfa_enabled=1`.

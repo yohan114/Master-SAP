@@ -6,8 +6,16 @@ const { exec } = require('../db');
 const HOME_SITE_ID = Number(process.env.HOME_SITE_ID || 1);
 
 // Row-bearing stores tables that carry per-site data and are site-scoped on read.
+// Parents are listed before their children so the child backfill can read the parent's site.
 const SITE_TABLES = ['items', 'issues', 'material_transfers', 'general_items', 'batteries',
   'receipts', 'general_item_transactions', 'battery_movements'];
+
+// Child tables inherit their site from the parent row: [foreignKey, parentTable].
+const CHILD_PARENT = {
+  receipts: ['itemId', 'items'],
+  general_item_transactions: ['itemId', 'general_items'],
+  battery_movements: ['batteryId', 'batteries'],
+};
 
 function ensure() {
   exec(`
@@ -35,11 +43,20 @@ function ensure() {
   ]) { try { exec(alter); } catch (_) { /* column already exists */ } }
 
   // Site column for row-level scoping. SQLite fills existing rows with the DEFAULT,
-  // so legacy data lands on the home site automatically; a NULL guard covers any
-  // table that already had the column added without one.
+  // so legacy data lands on the home site automatically. On the run that first adds a
+  // child table's column, backfill its site from the parent row so a receipt/movement
+  // follows its item/battery (matters only once data spans more than one site).
   for (const t of SITE_TABLES) {
-    try { exec(`ALTER TABLE ${t} ADD COLUMN site_id INTEGER NOT NULL DEFAULT ${HOME_SITE_ID}`); }
+    let added = false;
+    try { exec(`ALTER TABLE ${t} ADD COLUMN site_id INTEGER NOT NULL DEFAULT ${HOME_SITE_ID}`); added = true; }
     catch (_) { /* column already exists (or table absent) */ }
+    if (added && CHILD_PARENT[t]) {
+      const [fk, parent] = CHILD_PARENT[t];
+      try {
+        exec(`UPDATE ${t} SET site_id = COALESCE(
+                (SELECT p.site_id FROM ${parent} p WHERE p.id = ${t}.${fk}), ${HOME_SITE_ID})`);
+      } catch (_) { /* parent column not present yet — leaves the home-site default */ }
+    }
     try { exec(`UPDATE ${t} SET site_id = ${HOME_SITE_ID} WHERE site_id IS NULL`); } catch (_) {}
   }
 }
