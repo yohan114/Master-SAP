@@ -1,10 +1,24 @@
-# UMMS app (PostgreSQL) — Workshop module
+# UMMS app (PostgreSQL) — one unified system
 
-The first runnable slice of the **unified UMMS platform** on the validated 74‑table PostgreSQL schema
-(`sql/schema.sql`). It stands up the shared foundation (auth, RBAC, site‑scope, document numbering) and
-the **Workshop Job‑Card + Final Costing** module (Tier 2 of `BUILD_BACKLOG.md`).
+**One system, one login, one database** on the validated 74‑table PostgreSQL schema (`sql/schema.sql`) —
+not separate apps. Shared foundation (auth, RBAC, site‑scope, numbering) with two modules live so far:
+**Stores** and **Workshop Job‑Card + Costing**, wired together so real material cost flows from a stock
+issue into a job's final cost.
 
-## What works (verified end‑to‑end — `npm run smoke`, 12/12)
+## What works (verified end‑to‑end — `npm run smoke`, 17/17)
+
+**One‑system integration (the point):** receive parts into stores → moving‑average cost rolls forward
+(10@1500 + 10@1700 → **1,600**) → issue to a workshop job → the issue **auto‑posts as a job part** →
+the job's material cost becomes the **real issued cost (4,800)**, valued at MWAC. Over‑issue is blocked
+by the live stock balance. All in one app.
+
+### Stores module (`routes/stores.js`)
+- **Receive (GRN)** — posts a goods‑received note + an `IN` movement and rolls the moving‑average cost.
+- **Issue** — checks the live balance, values at MWAC, posts an `OUT` movement + issue document, and —
+  when `jobcard_id` is given — **creates the job part**, so stores and workshop are one flow.
+- **Stock / items** — on‑hand, moving‑avg cost, and stock value per item‑location (site‑scoped).
+
+### Workshop module (`routes/jobcards.js`)
 - **Auth + RBAC** — session login; `requirePerm` gates every write (`viewer` cannot create a job → 403).
 - **Job cards** — create (numbered `JOB-<SITE>-YY-NNNNNN`), list (site‑scoped), get with lines + cost.
 - **Labour** — rate resolved from `md_labour_rate` by the technician's grade, effective on the labour
@@ -23,6 +37,7 @@ the **Workshop Job‑Card + Final Costing** module (Tier 2 of `BUILD_BACKLOG.md`
 | `auth/mw.js` | session table, `authMiddleware`, `requirePerm`, `scopeSql` (row‑level site filter) |
 | `lib/numbering.js` | `TYPE-SITE-YY-NNNNNN` via an atomic counter row |
 | `routes/auth.js` | login / logout |
+| `routes/stores.js` | the Stores module (receive/GRN · issue · MWAC ledger · issue→job link) |
 | `routes/jobcards.js` | the Workshop module (jobs · labour · parts · cost · close) |
 | `server.js` | wiring |
 | `seed.js` | minimal masters + `admin`/`foreman`/`viewer` users |
@@ -41,10 +56,12 @@ npm run smoke         # 12/12
 ```
 
 ## Next on this platform (see `BUILD_BACKLOG.md`)
-- **Outside‑repair** capture into the roll‑up; approval workflow (TM/OM) on job close.
-- **The cross‑module link:** consume real **stores/oil issues** as job parts (replaces the manual part
-  line) — the "material cost flows into job cost" integration.
-- Shared masters + data load (ETLs in `migration/`), dashboards, single sign‑on across modules.
+- **Oil/Lubricant module** — build directly on this platform (products, issue ledger, consumption by
+  asset) and migrate the real `oilbook` data in. *Choosing one unified system means oil becomes a
+  module here — no need to touch its separate app.*
+- **Battery module** — serial‑tracked lifecycle on `md_asset` + `hist_battery_event`.
+- Load all real data via the ETLs in `migration/` (reconciled: LKR 12.19M, 0 orphan FKs).
+- Outside‑repair into the job roll‑up; approval workflow (TM/OM) on close; unified UI + live dashboards.
 
 > Config is env‑driven (`PG*`, `PORT`, `NODE_ENV`); no secrets in code. Cookies become `Secure`
 > automatically under `NODE_ENV=production` behind TLS.

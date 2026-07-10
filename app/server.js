@@ -15,6 +15,7 @@ app.use('/auth', require('./routes/auth'));      // public
 app.use('/api', authMiddleware);                 // everything below requires a session
 app.get('/api/me', (req, res) => res.json({ user: req.user, perms: [...req.perms], sites: [...req.sites] }));
 app.use('/api/jobcards', require('./routes/jobcards'));
+app.use('/api/stores', require('./routes/stores'));
 
 const PORT = process.env.PORT || 4000;
 async function start() {

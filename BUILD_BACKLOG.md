@@ -3,6 +3,12 @@
 Honest backlog to go from *"secured stores app + validated design"* to a *fully live unified system*.
 Ordered by what gives value soonest. Sizing is rough effort, not a quote.
 
+> **Direction chosen: ONE unified system** (one app, one login, one database) — not separate secured
+> apps. This unblocks the oil work: oil becomes a **module built on the platform** with its data
+> migrated in, so Tier 1's dependency on the separate oil app's source **no longer blocks go‑live**.
+> The `app/` on PostgreSQL already runs **Stores + Workshop** in one login, with stock issues flowing
+> straight into job cost.
+
 **Legend:** ✅ done · 🟢 deploy‑only (no building) · 🟡 small build · 🟠 medium build · 🔴 large build ·
 ⛔ blocked (needs something from you)
 
@@ -16,22 +22,22 @@ Nothing to *build* — just run it. Everything here is scripted + verified.
 - [ ] 🟢 Cron the cert renewal (`renew-cert.sh`) + nightly DB backup
 - [ ] 🟢 Rotate any old credential that touched code (incl. `E&CWorkshop`); freeze the old app read‑only at cutover
 
-## Tier 1 — Bring the Oil app to the same bar  🟡 (a few days) ⛔ needs oil source
-The oil app (`Oil Stock System` / `oilbook.db`) is **more modern than stores — it already has auth**
-(`users` + `role` + `sessions`, `projects`/`sites`/`user_projects` scoping). So it does **not** need the
-stores‑style "add auth" port. What it needs:
-- [ ] ⛔ **Share the oil app's full source** (its real `server.js`/routes + `package.json` + UI) — I only have `schema.sql` + `ledger.js`
-- [ ] 🟡 Security audit of its existing auth/session/RBAC + SQL‑injection pass
-- [ ] 🟡 Add the missing pieces to match stores: **MFA**, **who/when/before‑after audit trail**, **CORS allow‑list**
-- [ ] 🟡 Its own **localhost + VPS deploy kit** (Docker/systemd/nginx/runbook)
+## Tier 1 — Oil/Lubricant as a module on the unified platform  🟠 (unblocked)
+*(Direction changed to one system, so this is no longer "secure the separate oil app" — it's build the
+oil module here + migrate the data. No dependency on the oil app's source.)*
+- [ ] 🟠 Build the **Oil module** on the platform: products, issue ledger (its `transactions` model),
+  consumption by fleet asset, stock counts/variance — reusing the shared auth/site‑scope/numbering
+- [ ] 🟠 **Migrate** the real `oilbook` data (21 products · 1,691 ledger txns · 414 fleet assets) into
+  the unified PostgreSQL (map to `md_item`/`md_asset`/`mv_stock_ledger`)
+- [ ] 🟢 Oil issues flow into job cost the same way stores issues already do (link is built)
 
 ## Tier 2 — Workshop: Job Cards + Final Costing  🟠→🔴 (weeks) — **STARTED, running on PostgreSQL**
 The backend is live in `app/` on the real schema (verified `npm run smoke`, 12/12).
 - [x] 🟠 Backend API: create/list/get **job cards** (numbered, site‑scoped, permission‑gated) — **done**
 - [x] 🟠 **Labour capture** — rate from `md_labour_rate` by grade × effective date — **done**
 - [x] 🟠 Parts (material vs general + provisional), **cost rollup into `cost_job_summary` + variance + close gating** — **done**
+- [x] 🔴 **The key integration:** a **stores issue posts straight to a job card** so material cost flows from the real issue at MWAC — **done & verified** (17/17). Oil issues will do the same once the oil module lands.
 - [ ] 🟠 Outside‑repair capture into the rollup; approval workflow (TM/OM) on close
-- [ ] 🔴 **The key integration:** link **stores issues + oil issues to a job card** so material cost flows from real issues (needs a job reference on issues in both apps)
 - [ ] 🟠 UI: job‑card entry screen + the costing view (prototypes exist to build from)
 - [ ] 🟡 Job cost reports / export
 

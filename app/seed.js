@@ -3,15 +3,18 @@
 const { q, one, tx } = require('./db');
 const { hashPassword } = require('./auth/password');
 
-const PERMS = ['ADMIN.ALL', 'READ.ALL_SITES', 'JOB.WRITE', 'JOB.LABOUR', 'JOB.PARTS', 'JOB.COST', 'JOB.CLOSE'];
+const PERMS = ['ADMIN.ALL', 'READ.ALL_SITES', 'JOB.WRITE', 'JOB.LABOUR', 'JOB.PARTS', 'JOB.COST', 'JOB.CLOSE',
+  'STORES.RECEIVE', 'STORES.ISSUE', 'STORES.READ'];
 const ROLES = {
   system_admin: ['ADMIN.ALL', 'READ.ALL_SITES'],
-  foreman:      ['JOB.WRITE', 'JOB.LABOUR', 'JOB.PARTS', 'JOB.COST', 'JOB.CLOSE'],
+  foreman:      ['JOB.WRITE', 'JOB.LABOUR', 'JOB.PARTS', 'JOB.COST', 'JOB.CLOSE', 'STORES.ISSUE', 'STORES.READ'],
+  storekeeper:  ['STORES.RECEIVE', 'STORES.ISSUE', 'STORES.READ'],
   viewer:       [],
 };
 const USERS = [
   ['admin',   'ChangeMe@Admin1', 'System Admin', 'system_admin'],
   ['foreman', 'ChangeMe@Fore1',  'Workshop Foreman', 'foreman'],
+  ['keeper',  'ChangeMe@Keep1',  'Store Keeper', 'storekeeper'],
   ['viewer',  'ChangeMe@View1',  'Read Only', 'viewer'],
 ];
 
@@ -80,6 +83,10 @@ const USERS = [
 
     await run(`INSERT INTO md_asset(asset_no, asset_name, asset_class, site_id, created_by)
       VALUES('VEH-0001','Tipper Truck 01','VEHICLE',$1,$2) ON CONFLICT (asset_no) DO NOTHING`, [siteId, CB]);
+
+    await run(`INSERT INTO md_supplier(supplier_no, supplier_name, created_by)
+      SELECT 'SUP-0001','General Supplier',$1
+      WHERE NOT EXISTS (SELECT 1 FROM md_supplier WHERE supplier_no='SUP-0001')`, [CB]);
 
     const grade = (await run(`INSERT INTO md_employee_grade(grade_code, grade_name, created_by) VALUES('MECH','Mechanic',$1)
       ON CONFLICT (grade_code) DO NOTHING RETURNING grade_id`, [CB]))[0]

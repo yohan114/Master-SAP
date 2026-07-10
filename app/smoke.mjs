@@ -63,6 +63,24 @@ console.log('\nGET job shows lines + cost');
 const got = await api(`/api/jobcards/${jid}`, admin.cookie);
 A('get job returns labour+parts+cost', got.body.labour.length === 1 && got.body.parts.length === 2 && got.body.cost.total_job_cost === '8750.00', { l: got.body.labour?.length, p: got.body.parts?.length, t: got.body.cost?.total_job_cost });
 
+console.log('\nONE SYSTEM: stores issue flows into a job cost (MWAC ledger)');
+const keeper = await login('keeper', 'ChangeMe@Keep1');
+// receive 10 @ 1500 then 10 @ 1700 -> moving-average cost = (15000+17000)/20 = 1600
+await api('/api/stores/receive', keeper.cookie, 'POST', { item_id: ids.spare, location_id: ids.site, qty: 10, unit_cost: 1500 });
+const rcv = await api('/api/stores/receive', keeper.cookie, 'POST', { item_id: ids.spare, location_id: ids.site, qty: 10, unit_cost: 1700 });
+A('MWAC after two receipts = 1600, on hand 20', rcv.body.moving_avg_cost === 1600 && rcv.body.on_hand_qty === 20, rcv.body);
+
+const job3 = await api('/api/jobcards', foreman.cookie, 'POST', { asset_id: ids.asset, location_id: ids.site, estimated_cost: 6000 });
+const j3 = job3.body.jobcard_id;
+const issue = await api('/api/stores/issue', foreman.cookie, 'POST', { item_id: ids.spare, location_id: ids.site, qty: 3, jobcard_id: j3 });
+A('issue 3 at MWAC 1600 -> line 4800, stock falls to 17', issue.body.line_amt === 4800 && issue.body.on_hand_qty === 17, issue.body);
+A('issue created a job part on the job card', !!issue.body.job_part_id, issue.body);
+
+const cost3 = await api(`/api/jobcards/${j3}/cost`, foreman.cookie, 'POST');
+A('job material cost now = the real issued cost (4800)', cost3.body.material_cost === 4800 && cost3.body.total_job_cost === 4800, cost3.body);
+
+A('over-issue is blocked (insufficient stock)', (await api('/api/stores/issue', foreman.cookie, 'POST', { item_id: ids.spare, location_id: ids.site, qty: 9999, jobcard_id: j3 })).status === 400);
+
 await pool.end();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
