@@ -8,7 +8,8 @@ Start with **`RUNBOOK.md`** — it is the step‑by‑step procedure. This folde
 | `RUNBOOK.md` | **The go‑live procedure** — one‑command VPS path + manual Docker/systemd paths, verification, MFA, backups, rollback |
 | `bootstrap-vps.sh` | **One‑shot go‑live** on a fresh Ubuntu/Debian VPS: installs Docker+certbot, applies the port, issues the TLS cert, templates nginx with your domain, brings the stack up, seeds your DB, verifies |
 | `renew-cert.sh` | No‑downtime Let's Encrypt renewal (webroot) + nginx reload — put on daily cron |
-| `apply-port.sh` | Idempotently applies `reference/storesdb-auth-port/` to a copy of your app (patch + auth files + deps + seed) |
+| `apply-port.sh` | Idempotently applies `reference/storesdb-auth-port/` to a copy of your app (patch + auth files + deps + seed) — bash |
+| `apply-port.mjs` | Same, **cross‑platform** (Windows/Mac/Linux) via Node + `git apply` — use this to try it on your PC first |
 | `Dockerfile` | Builds the secured app image (non‑root, `/health` probe); build context = your ported app dir |
 | `docker-compose.yml` | Production stack — app + nginx TLS proxy, persistent `inventory.db` volume |
 | `nginx/umms.conf` | TLS termination + security headers + login throttle, proxies to the app container |

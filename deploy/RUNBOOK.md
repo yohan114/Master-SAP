@@ -12,6 +12,41 @@ scale. Nothing here needs PostgreSQL.
 
 ---
 
+## 💻 Try it on your PC first (localhost)
+
+Before the VPS, run the secured app on your own machine to click around. Works on **Windows, Mac,
+Linux** — you only need **Node 20+** and **Git** installed (no Docker, no TLS).
+
+```bash
+# 1. get the code
+git clone <this-repo-url> && cd Master-SAP
+git checkout claude/master-management-system-uetj7w
+
+# 2. make a COPY of your storesdb app to experiment on (keep your original safe)
+#    Windows (PowerShell):  Copy-Item -Recurse C:\path\to\storesdb C:\umms-test\storesdb
+#    Mac/Linux:             cp -r /path/to/storesdb ~/umms-test/storesdb
+
+# 3. apply the security port to the copy (cross-platform Node script — no bash/patch needed)
+node deploy/apply-port.mjs C:\umms-test\storesdb --seed     # Windows path
+#   node deploy/apply-port.mjs ~/umms-test/storesdb --seed  # Mac/Linux
+
+# 4. run it locally
+cd C:\umms-test\storesdb   # (or ~/umms-test/storesdb)
+node server.js
+```
+
+Open **http://localhost:5000** → you'll be redirected to the login page. Sign in with the seeded
+`admin / ChangeMe@Admin1`, confirm the tracker loads, then try `keeper / ChangeMe@Keep1` to see the
+reduced permissions. On localhost the session cookie is plain http (that's expected — it becomes
+`Secure` automatically once you deploy behind HTTPS with `NODE_ENV=production`).
+
+> Verified end-to-end: `apply-port.mjs` produces a build identical to the tested one and boots on
+> localhost (health, login, RBAC, 401-on-unauth, UI login gate all pass).
+
+When you're happy, move to the VPS below — same app, plus HTTPS and a process manager.
+
+---
+
 ## ⚡ Fastest path — one command on a fresh Ubuntu/Debian VPS
 
 If you have a VPS + domain, this does everything (installs Docker + certbot, ports the app, issues the
