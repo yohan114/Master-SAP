@@ -77,6 +77,13 @@ mutation into `audit_log`, snapshotting the affected row before and after the ha
 Credentials/tokens are redacted from the logged request body; a `reason` field (for
 reversals/adjustments) is captured whenever the caller supplies one.
 
+**Mutation site enforcement** — reads are scoped, and the write side is guarded too: `enforceSite`
+blocks a site‑restricted user from touching another site's row by id. Verified (12/12): a site‑2 keeper
+`PUT`ting a site‑1 item/battery/general‑item/transfer/issue → **403**; the body‑id routes
+(`/api/batteries/move`, `/api/general-items/transaction`) with a site‑1 id → **403**; own‑site edits
+and admins are unaffected; plain creates pass. *(New rows currently take the home‑site default — see
+"Before go‑live" for stamping the creator's site when you deploy multiple sites.)*
+
 **SQL‑injection audit** — every query in the app was reviewed: all values are bound `?` params, the
 only interpolated identifiers are hardcoded column literals (the receipt `SET` builder) and
 allow‑listed sort columns (`ITEM_SORTS`/`validSortCols`, `order` normalized to `ASC`/`DESC`), no user
@@ -91,6 +98,7 @@ keeper's export contains 10 items / 4 issues / 3 batteries / 2 transfers vs the 
 | `auth/password.js` | argon2id → scrypt hashing (no native build needed) |
 | `auth/authMiddleware.js` | session cookie → user + permissions |
 | `auth/rbac.js` | `requirePerm()` + `siteScope()` + **`scopeWhere(req, alias)`** (row‑level site filter as a bare `WHERE` condition) |
+| `auth/siteGuard.js` | `enforceSite` — blocks a site‑restricted user from **updating/deleting/moving another site's row** by id (path `:id` and body‑id routes) |
 | `auth/audit.js` | append‑only `audit_log` writes |
 | `auth/auditChange.js` | mutation audit middleware — snapshots the affected row **before/after** every create/update/delete and logs who + when + changed fields |
 | `auth/schema.js` | `ensure()` creates the `sec_*` + `audit_log` tables **and adds a `site_id` column (backfilled to the home site) to the row‑bearing stores tables** |
@@ -117,9 +125,9 @@ The patch: adds `cookie-parser` + auth wiring after `express.json`; mounts `/aut
 session** (so results can be site‑scoped and nothing leaks to anonymous callers) and mutations
 additionally need `STORES.PRICE` / `STORES.ISSUE` / `STORES.TRANSFER` / `STORES.WRITE` by route;
 splices **`scopeWhere(req)` into every read** (lists, `/:id` lookups, dropdowns, dashboards/aggregates)
-so a keeper only sees their assigned site(s); mounts the **`auditChange` middleware** so every mutation
-is recorded with who/when/before/after; and gates the tracker UI behind login (unauthenticated →
-`/login.html`).
+so a keeper only sees their assigned site(s); mounts **`enforceSite`** so a mutation can't target
+another site's row; mounts the **`auditChange` middleware** so every mutation is recorded with
+who/when/before/after; and gates the tracker UI behind login (unauthenticated → `/login.html`).
 
 ## Before go‑live
 - **Change the seeded passwords** immediately (they're placeholders) and force first‑login change.
@@ -131,8 +139,12 @@ is recorded with who/when/before/after; and gates the tracker UI behind login (u
   lists, single‑record `/:id` lookups, dropdowns, and the dashboard/aggregate endpoints
   (`/api/dashboard/*`, `/api/sidebar-stats`, `/api/inventory`, `*/stats`) — filter by the user's
   `sec_user_site` assignment (admins / `READ.ALL_SITES` see everything). Give each real site an id,
-  assign keepers with `INSERT INTO sec_user_site(user_id, location_id)`, and set `site_id` on new rows
-  as you create them (the write routes should stamp the creator's site — a natural follow‑on).
+  assign keepers with `INSERT INTO sec_user_site(user_id, location_id)`. Cross‑site **reads and
+  mutations are already blocked** (`scopeWhere` + `enforceSite`). The one remaining multi‑site step is
+  **stamping the creator's site on new rows**: today an INSERT takes the `HOME_SITE_ID` default (correct
+  for a single‑site deployment). When you run more than one site, set `site_id` to the creator's site in
+  each create handler (or, for a single‑site user, in a small after‑insert middleware keyed on
+  `req.sites`), and decide the site‑selection UX for multi‑site users.
 - **MFA is built in** (`auth/totp.js`; `login` enforces the second factor when `mfa_enabled=1`).
   `schema.js` adds the `mfa_secret`/`mfa_enabled` columns automatically. Enrol admin/finance at
   go‑live: set a secret, have them scan the `otpauth://` URI, then flip `mfa_enabled=1`.
