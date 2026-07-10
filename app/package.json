@@ -1,0 +1,17 @@
+{
+  "name": "umms-app",
+  "version": "0.1.0",
+  "description": "UMMS unified platform (PostgreSQL) — Workshop Job-Card + Costing module (first vertical).",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "seed": "node seed.js",
+    "smoke": "node smoke.mjs"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  }
+}
