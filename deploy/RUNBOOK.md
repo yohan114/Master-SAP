@@ -12,6 +12,29 @@ scale. Nothing here needs PostgreSQL.
 
 ---
 
+## ⚡ Fastest path — one command on a fresh Ubuntu/Debian VPS
+
+If you have a VPS + domain, this does everything (installs Docker + certbot, ports the app, issues the
+TLS cert, templates nginx, brings the stack up, seeds your DB, verifies):
+
+```bash
+# 0. Point DNS: an A record for your domain -> this VPS's public IP. Open ports 80 + 443.
+# 1. Get the code + your app onto the VPS:
+git clone <this-repo-url> && cd Master-SAP
+#    copy your storesdb app to /opt/umms/storesdb (server.js, db.js, inventory.db, item_tracker.html, package.json)
+# 2. Go live:
+sudo DOMAIN=your.domain EMAIL=you@your.domain APP_DIR=/opt/umms/storesdb \
+     bash deploy/bootstrap-vps.sh
+```
+
+It ends by printing your live URL (`https://your.domain/login.html`) and the two cron lines for cert
+renewal (`deploy/renew-cert.sh`) + nightly DB backup. Then do the **Lock it down** step below (change
+seeded passwords, enable MFA). If anything fails mid‑way it's safe to re‑run — every step is idempotent.
+
+The manual, step‑by‑step paths below are for when you want more control (or aren't on apt/Ubuntu).
+
+---
+
 ## 0. Prerequisites
 - A Linux host (VM or on‑prem) with a public DNS name pointing at it (e.g. `umms.example.com`).
 - Ports 80 + 443 reachable.
