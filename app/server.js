@@ -8,6 +8,7 @@ const { q } = require('./db');
 
 const app = express();
 app.disable('x-powered-by');
+if (process.env.TRUST_PROXY) app.set('trust proxy', Number(process.env.TRUST_PROXY) || 1); // correct client IPs behind nginx
 app.use(express.json());
 app.use(cookieParser());
 
