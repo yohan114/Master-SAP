@@ -28,9 +28,9 @@ oil module here + migrate the data. No dependency on the oil app's source.)*
 - [x] 🟠 Build the **Oil module** on the platform: products, receive/issue (shared engine),
   consumption by fleet asset, stock counts/variance — **done & verified** (22/22)
 - [x] 🟢 Oil issues flow into job cost the same way stores issues do — **done** (shared engine)
-- [~] 🟠 **Migrate** the real data — **masters done** (`app/migrate-legacy.js`): 2,743 spare items · 78
-  general · 21 oil products · 414 fleet assets · 37 batteries loaded into the unified DB and served by
-  the app. *Remaining: opening stock balances + historical transactions/ledger.*
+- [x] 🟠 **Migrate** the real data — masters + opening balances done (`app/migrate-legacy.js` +
+  `app/backfill-opening.js`): 2,743 spare items · 78 general · 21 oil products · 414 fleet assets · 37
+  batteries, plus **2,143 opening stock balances (LKR 13.09M)**. *Optional: full historical txn replay.*
 
 ## Tier 2 — Workshop: Job Cards + Final Costing  🟠→🔴 (weeks) — **STARTED, running on PostgreSQL**
 The backend is live in `app/` on the real schema (verified `npm run smoke`, 12/12).
