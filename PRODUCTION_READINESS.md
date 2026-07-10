@@ -43,7 +43,7 @@ Target: **one UMMS instance, one server database, one set of masters** (see `doc
 - [x] **Tested restore** — **drill script PASSED** (`ops/backup/pg_restore_drill.sh`): restored latest dump into a clean DB, all key‑table counts + total stock value matched the live DB.
 
 ### Audit
-- [ ] Every create/update/approve/reverse stamped **who + when + before/after**; reversals require a reason; no silent edits to price/cost. *(Owner: ___)*
+- [x] Every create/update/approve/reverse stamped **who + when + before/after** — a single `auditChange` middleware (`reference/storesdb-auth-port/auth/auditChange.js`) snapshots the affected row before/after every `/api` mutation into `audit_log` (actor, changed fields, `reason`, and denied attempts). Verified: create logs the new‑row after‑image; edit logs `changed:[itemName,reqQty]` with before/after; **pricing a receipt logs `unitPrice None→1234` (no silent price/cost edits)**; delete logs the before‑snapshot + reason; a keeper's denied delete logs `status 403 [denied]`. *App‑level reversal endpoints should pass a `reason` (captured when present); enforce required‑reason on any domain reversal flow you add.*
 
 ### Migration cutover — `docs/08`, `migration/`, `ops/reconcile/`
 - [~] Exception queues worked down — **worklists generated** by `ops/reconcile/reconcile.py` (pending pricing 1,510 · rate‑pending 114 lines/10 techs · negative on‑hand 5 · uncosted jobs · general‑asset jobs 4). *Work them down against final data.* *(Owner: ___)*

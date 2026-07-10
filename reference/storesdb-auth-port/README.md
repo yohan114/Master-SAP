@@ -63,6 +63,20 @@ endpoints:
 > stock view always 500'd (`unrecognized token "$"`). Unescaping it makes the endpoint work — and it's
 > now site‑scoped like the rest.
 
+**Audit trail (who + when + before/after)** — one `auditChange` middleware records every `/api`
+mutation into `audit_log`, snapshotting the affected row before and after the handler runs:
+
+| Action | Recorded |
+|---|---|
+| `POST /api/items` (create) | actor, new row id, **after**‑image |
+| `PUT /api/items/:id` (edit) | actor, **before/after**, `changed: [itemName, reqQty]` |
+| `PUT /api/receipts/:id` (pricing) | actor, `changed: [unitPrice]`, **unitPrice None→1234**, `reason` |
+| `DELETE /api/items/:id` (admin) | actor, **before**‑snapshot, `reason` |
+| `DELETE /api/items/:id` (keeper, no perm) | actor, **status 403 `[denied]`**, before‑snapshot |
+
+Credentials/tokens are redacted from the logged request body; a `reason` field (for
+reversals/adjustments) is captured whenever the caller supplies one.
+
 ## Files
 | File | Purpose |
 |---|---|
@@ -70,6 +84,7 @@ endpoints:
 | `auth/authMiddleware.js` | session cookie → user + permissions |
 | `auth/rbac.js` | `requirePerm()` + `siteScope()` + **`scopeWhere(req, alias)`** (row‑level site filter as a bare `WHERE` condition) |
 | `auth/audit.js` | append‑only `audit_log` writes |
+| `auth/auditChange.js` | mutation audit middleware — snapshots the affected row **before/after** every create/update/delete and logs who + when + changed fields |
 | `auth/schema.js` | `ensure()` creates the `sec_*` + `audit_log` tables **and adds a `site_id` column (backfilled to the home site) to the row‑bearing stores tables** |
 | `auth/routes.js` | `POST /auth/login` (rate‑limited + lockout + **MFA second‑factor step**) · `POST /auth/logout` |
 | `auth/totp.js` | zero‑dependency RFC 6238 TOTP (base32, HMAC‑SHA1, `verifyTotp` with ±1 step window) |
@@ -93,9 +108,10 @@ The patch: adds `cookie-parser` + auth wiring after `express.json`; mounts `/aut
 `requirePerm('STORES.DELETE')`; adds a single **`/api` guard** where **every read requires a valid
 session** (so results can be site‑scoped and nothing leaks to anonymous callers) and mutations
 additionally need `STORES.PRICE` / `STORES.ISSUE` / `STORES.TRANSFER` / `STORES.WRITE` by route;
-splices **`scopeWhere(req)` into the core list reads** (`/api/items`, `/api/issues`,
-`/api/transfers`, `/api/general-items`, `/api/batteries`) so a keeper only sees their assigned
-site(s); and gates the tracker UI behind login (unauthenticated → `/login.html`).
+splices **`scopeWhere(req)` into every read** (lists, `/:id` lookups, dropdowns, dashboards/aggregates)
+so a keeper only sees their assigned site(s); mounts the **`auditChange` middleware** so every mutation
+is recorded with who/when/before/after; and gates the tracker UI behind login (unauthenticated →
+`/login.html`).
 
 ## Before go‑live
 - **Change the seeded passwords** immediately (they're placeholders) and force first‑login change.
