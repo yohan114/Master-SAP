@@ -48,7 +48,7 @@ The blueprint + **validated 74‑table PostgreSQL schema** + **tested ETLs** exi
 - [x] 🔴 Build the app on `sql/schema.sql` — **all four domain backends + a unified web UI + a deploy
   kit done** (Stores · Oil · Battery · Workshop in one login/DB/engine, 31/31; SPA at `/` on real data;
   `app/deploy/` = Docker Compose Postgres+app+nginx TLS + one‑command VPS bootstrap, self‑seeding on
-  first boot). *Remaining: opening balances/historical txns.*
+  first boot). *Opening stock balances backfilled too (`app/backfill-opening.js`).*
 - [ ] 🟠 **Shared masters** — one item master, one asset/vehicle master, one supplier/employee/location/UoM (dedup already prototyped: 1,339 assets, 2,730 items)
 - [ ] 🟠 Load all four domains into PostgreSQL (ETLs done + reconciled — LKR 12.19M, 0 orphan FKs) and keep them in sync until cutover
 - [ ] 🟠 Cross‑module engine: single **stock ledger**, **MWAC valuation**, effective‑date pricing, approval workflows
