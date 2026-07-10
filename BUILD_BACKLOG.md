@@ -25,19 +25,20 @@ stores‑style "add auth" port. What it needs:
 - [ ] 🟡 Add the missing pieces to match stores: **MFA**, **who/when/before‑after audit trail**, **CORS allow‑list**
 - [ ] 🟡 Its own **localhost + VPS deploy kit** (Docker/systemd/nginx/runbook)
 
-## Tier 2 — Workshop: Job Cards + Final Costing  🟠→🔴 (weeks) — build from scratch
-Today this is only Excel‑derived **report prototypes** (`job_costing*.html`), not a running app. The
-PostgreSQL schema for it already exists in `sql/schema.sql`. To build:
-- [ ] 🟠 Backend API: create/hold/close **job cards** (breakdown/preventive/accident/…) with approval gating
-- [ ] 🟠 **Labour capture** — technician + grade + hours × effective‑date labour rate
-- [ ] 🔴 **The key integration:** link **stores issues + oil issues to a job card** so material cost flows into job cost (this is the "pending MRN→job link" gap — needs a job reference on issues in both apps)
-- [ ] 🟠 Outside‑repair costs, parts (general + provisional), variance, **final cost rollup + close gating**
+## Tier 2 — Workshop: Job Cards + Final Costing  🟠→🔴 (weeks) — **STARTED, running on PostgreSQL**
+The backend is live in `app/` on the real schema (verified `npm run smoke`, 12/12).
+- [x] 🟠 Backend API: create/list/get **job cards** (numbered, site‑scoped, permission‑gated) — **done**
+- [x] 🟠 **Labour capture** — rate from `md_labour_rate` by grade × effective date — **done**
+- [x] 🟠 Parts (material vs general + provisional), **cost rollup into `cost_job_summary` + variance + close gating** — **done**
+- [ ] 🟠 Outside‑repair capture into the rollup; approval workflow (TM/OM) on close
+- [ ] 🔴 **The key integration:** link **stores issues + oil issues to a job card** so material cost flows from real issues (needs a job reference on issues in both apps)
 - [ ] 🟠 UI: job‑card entry screen + the costing view (prototypes exist to build from)
 - [ ] 🟡 Job cost reports / export
 
-## Tier 3 — Unify into one UMMS platform  🔴 (months) — the real "one system"
-The blueprint + **validated 74‑table PostgreSQL schema** + **tested ETLs** exist; the *application* does not.
-- [ ] 🔴 Build the app on `sql/schema.sql` — backend APIs + UI + dashboards (dashboards today are static renders)
+## Tier 3 — Unify into one UMMS platform  🔴 (months) — **foundation STARTED**
+The blueprint + **validated 74‑table PostgreSQL schema** + **tested ETLs** exist; the app is now begun
+(`app/` runs on PostgreSQL with shared auth/RBAC/site‑scope/numbering + the Workshop module).
+- [~] 🔴 Build the app on `sql/schema.sql` — backend APIs + UI + dashboards (**foundation + first module done**; more modules + UI + live dashboards remain — today dashboards are static renders)
 - [ ] 🟠 **Shared masters** — one item master, one asset/vehicle master, one supplier/employee/location/UoM (dedup already prototyped: 1,339 assets, 2,730 items)
 - [ ] 🟠 Load all four domains into PostgreSQL (ETLs done + reconciled — LKR 12.19M, 0 orphan FKs) and keep them in sync until cutover
 - [ ] 🟠 Cross‑module engine: single **stock ledger**, **MWAC valuation**, effective‑date pricing, approval workflows
