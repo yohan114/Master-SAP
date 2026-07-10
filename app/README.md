@@ -59,6 +59,12 @@ by the live stock balance. All in one app.
 | `seed.js` | minimal masters + `admin`/`foreman`/`viewer` users |
 | `smoke.mjs` | end‑to‑end proof |
 
+## The web UI
+A single-page UI is served by the same app at `/` (see `public/`): login → dashboard (live KPIs) →
+Stores · Oil · Battery · Workshop. It drives the same APIs — browse the real catalog, receive/issue
+stock, register/install batteries and view their history, and run the full job‑costing flow
+(create → labour → issue parts → compute → close). No build step; vanilla JS, theme‑aware.
+
 ## Load your real data
 `migrate-legacy.js` reads the two legacy SQLite books and loads the real masters (items, oil products,
 fleet assets, batteries) into the unified DB — run it after `seed.js` (uses distinct `item_no` prefixes

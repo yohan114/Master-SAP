@@ -45,7 +45,9 @@ The backend is live in `app/` on the real schema (verified `npm run smoke`, 12/1
 ## Tier 3 — Unify into one UMMS platform  🔴 (months) — **foundation STARTED**
 The blueprint + **validated 74‑table PostgreSQL schema** + **tested ETLs** exist; the app is now begun
 (`app/` runs on PostgreSQL with shared auth/RBAC/site‑scope/numbering + the Workshop module).
-- [~] 🔴 Build the app on `sql/schema.sql` — **all four domain backends done** (Stores · Oil · Battery · Workshop, one login/DB, shared inventory engine, 31/31); **UI + live dashboards + real‑data load remain**
+- [x] 🔴 Build the app on `sql/schema.sql` — **all four domain backends + a unified web UI done**
+  (Stores · Oil · Battery · Workshop in one login/DB/engine, 31/31; SPA at `/` with live dashboard on
+  real data). *Remaining: opening balances/historical txns, and the platform deploy kit.*
 - [ ] 🟠 **Shared masters** — one item master, one asset/vehicle master, one supplier/employee/location/UoM (dedup already prototyped: 1,339 assets, 2,730 items)
 - [ ] 🟠 Load all four domains into PostgreSQL (ETLs done + reconciled — LKR 12.19M, 0 orphan FKs) and keep them in sync until cutover
 - [ ] 🟠 Cross‑module engine: single **stock ledger**, **MWAC valuation**, effective‑date pricing, approval workflows
