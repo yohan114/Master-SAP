@@ -1,5 +1,5 @@
 --- server.orig.js	2026-07-09 14:38:18.825564949 +0000
-+++ server.js	2026-07-10 03:10:28.464499424 +0000
++++ server.js	2026-07-10 03:16:12.368491559 +0000
 @@ -26,13 +26,58 @@
  
  app.use(express.json({ limit: '100mb' }));
@@ -839,3 +839,25 @@
      try {
          const id = parseInt(req.params.id);
          dbApi.transaction(() => {
+@@ -1738,12 +1818,15 @@
+ // ===========================================================================
+ app.get('/api/export/excel', (req, res) => {
+     try {
+-        const items = dbApi.all(`SELECT * FROM items`);
+-        const receipts = dbApi.all(`SELECT * FROM receipts`);
+-        const issues = dbApi.all(`SELECT * FROM issues ORDER BY issueDateISO DESC`);
+-        const batteries = dbApi.all(`SELECT * FROM batteries ORDER BY serialNumber COLLATE NOCASE ASC`);
+-        const batteryMovements = dbApi.all(`SELECT bm.*, b.serialNumber, b.itemName FROM battery_movements bm JOIN batteries b ON bm.batteryId = b.id ORDER BY bm.movementDateISO DESC, bm.id DESC`);
+-        const transfers = dbApi.all(`SELECT * FROM material_transfers ORDER BY transferDateISO DESC, id DESC`);
++        // Export is a bulk read — scope it to the caller's site(s) like every other read.
++        const ws = whereSite(req);
++        const wsB = whereSite(req, 'b');
++        const items = dbApi.all(`SELECT * FROM items${ws.sql}`, ws.params);
++        const receipts = dbApi.all(`SELECT * FROM receipts${ws.sql}`, ws.params);
++        const issues = dbApi.all(`SELECT * FROM issues${ws.sql} ORDER BY issueDateISO DESC`, ws.params);
++        const batteries = dbApi.all(`SELECT * FROM batteries${ws.sql} ORDER BY serialNumber COLLATE NOCASE ASC`, ws.params);
++        const batteryMovements = dbApi.all(`SELECT bm.*, b.serialNumber, b.itemName FROM battery_movements bm JOIN batteries b ON bm.batteryId = b.id${wsB.sql} ORDER BY bm.movementDateISO DESC, bm.id DESC`, wsB.params);
++        const transfers = dbApi.all(`SELECT * FROM material_transfers${ws.sql} ORDER BY transferDateISO DESC, id DESC`, ws.params);
+ 
+         const byItem = {};
+         for (const r of receipts) (byItem[r.itemId] = byItem[r.itemId] || []).push(r);

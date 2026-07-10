@@ -77,6 +77,14 @@ mutation into `audit_log`, snapshotting the affected row before and after the ha
 Credentials/tokens are redacted from the logged request body; a `reason` field (for
 reversals/adjustments) is captured whenever the caller supplies one.
 
+**SQL‑injection audit** — every query in the app was reviewed: all values are bound `?` params, the
+only interpolated identifiers are hardcoded column literals (the receipt `SET` builder) and
+allow‑listed sort columns (`ITEM_SORTS`/`validSortCols`, `order` normalized to `ASC`/`DESC`), no user
+input reaches a raw `exec()`, and bulk import uses prepared statements. The scope helpers keep this
+property. One gap was found and fixed along the way: **`/api/export/excel` was an unscoped bulk read**
+(a keeper could export all sites) — its six queries are now site‑scoped (unit‑verified: a site‑2
+keeper's export contains 10 items / 4 issues / 3 batteries / 2 transfers vs the admin's full set).
+
 ## Files
 | File | Purpose |
 |---|---|
