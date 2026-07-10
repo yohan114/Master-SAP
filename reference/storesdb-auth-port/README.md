@@ -99,6 +99,7 @@ keeper's export contains 10 items / 4 issues / 3 batteries / 2 transfers vs the 
 | `auth/authMiddleware.js` | session cookie → user + permissions |
 | `auth/rbac.js` | `requirePerm()` + `siteScope()` + **`scopeWhere(req, alias)`** (row‑level site filter as a bare `WHERE` condition) |
 | `auth/siteGuard.js` | `enforceSite` — blocks a site‑restricted user from **updating/deleting/moving another site's row** by id (path `:id` and body‑id routes) |
+| `auth/cors.js` | env‑configured CORS allow‑list (`CORS_ORIGINS`); default is same‑origin only, credentials‑safe (echoes exact origin, never `*`) |
 | `auth/audit.js` | append‑only `audit_log` writes |
 | `auth/auditChange.js` | mutation audit middleware — snapshots the affected row **before/after** every create/update/delete and logs who + when + changed fields |
 | `auth/schema.js` | `ensure()` creates the `sec_*` + `audit_log` tables **and adds a `site_id` column (backfilled to the home site) to the row‑bearing stores tables** |
@@ -127,7 +128,8 @@ additionally need `STORES.PRICE` / `STORES.ISSUE` / `STORES.TRANSFER` / `STORES.
 splices **`scopeWhere(req)` into every read** (lists, `/:id` lookups, dropdowns, dashboards/aggregates)
 so a keeper only sees their assigned site(s); mounts **`enforceSite`** so a mutation can't target
 another site's row; mounts the **`auditChange` middleware** so every mutation is recorded with
-who/when/before/after; and gates the tracker UI behind login (unauthenticated → `/login.html`).
+who/when/before/after; adds an env‑configured **CORS allow‑list** (`auth/cors.js`, same‑origin by
+default); and gates the tracker UI behind login (unauthenticated → `/login.html`).
 
 ## Before go‑live
 - **Change the seeded passwords** immediately (they're placeholders) and force first‑login change.
@@ -148,4 +150,13 @@ who/when/before/after; and gates the tracker UI behind login (unauthenticated �
 - **MFA is built in** (`auth/totp.js`; `login` enforces the second factor when `mfa_enabled=1`).
   `schema.js` adds the `mfa_secret`/`mfa_enabled` columns automatically. Enrol admin/finance at
   go‑live: set a secret, have them scan the `otpauth://` URI, then flip `mfa_enabled=1`.
+- **CORS**: same‑origin only by default. To allow specific cross‑origin browser clients set
+  `CORS_ORIGINS` to a comma‑separated list of exact origins (e.g.
+  `CORS_ORIGINS=https://umms.example.com`). Never use `*` with credentials — `auth/cors.js` echoes the
+  exact origin so the session cookie stays scoped.
+- **Secrets & config**: the ported code holds **no static secret** — session tokens and TOTP secrets
+  are random per‑use, and all config is env‑driven (`INVENTORY_DB`, `NODE_ENV`, `HOME_SITE_ID`,
+  `CORS_ORIGINS`). Keep `inventory.db`, `.env`, and any exports **out of git** (see the repo
+  `.gitignore`), load real DB/vault creds from your secret store, and rotate anything that ever lived
+  in code (including the old `E&CWorkshop`).
 - For prod‑grade hashing run `npm install argon2` (the code auto‑detects and uses it).

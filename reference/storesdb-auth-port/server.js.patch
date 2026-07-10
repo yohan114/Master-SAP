@@ -1,12 +1,14 @@
 --- server.orig.js	2026-07-09 14:38:18.825564949 +0000
-+++ server.js	2026-07-10 03:19:23.292487192 +0000
-@@ -26,13 +26,60 @@
++++ server.js	2026-07-10 03:26:28.880477457 +0000
+@@ -26,13 +26,62 @@
  
  app.use(express.json({ limit: '100mb' }));
  
 +// --- UMMS auth (replaces the hard-coded delete password) ---
 +const cookieParser = require('cookie-parser');
 +app.use(cookieParser());
++const { cors } = require('./auth/cors');
++app.use(cors);                                    // env-configured CORS allow-list (default: same-origin only)
 +require('./auth/schema').ensure();
 +const authRoutes = require('./auth/routes');
 +const { authMiddleware } = require('./auth/authMiddleware');
@@ -62,7 +64,7 @@
  
  // --- helpers ----------------------------------------------------------------
  const s = (v) => (v === null || v === undefined) ? '' : String(v);
-@@ -51,9 +98,13 @@
+@@ -51,9 +100,13 @@
  };
  
  // Build the item-level WHERE clause shared by list + count queries.
@@ -77,7 +79,7 @@
      if (q.search) {
          const like = `%${q.search}%`;
          where.push(`(i.mrnNum LIKE ? OR i.itemName LIKE ? OR i.vehicleMachinery LIKE ? OR i.itemDesc LIKE ? OR i.category LIKE ? OR EXISTS(SELECT 1 FROM receipts rr WHERE rr.itemId=i.id AND (rr.grnNumber LIKE ? OR rr.invoiceNumber LIKE ? OR rr.supplierName LIKE ?)))`);
-@@ -108,11 +159,13 @@
+@@ -108,11 +161,13 @@
  
          // Unpaginated: return the whole dataset (used by dashboard/fleet/dropdowns).
          if (!page || !limit) {
@@ -93,7 +95,7 @@
          const tab = filterTabClause(req.query.filter);
          const outerWhere = tab ? `WHERE ${tab}` : '';
  
-@@ -175,17 +228,10 @@
+@@ -175,17 +230,10 @@
      }
  });
  
@@ -113,7 +115,7 @@
      try {
          const id = parseInt(req.params.id);
          dbApi.transaction(() => {
-@@ -249,7 +295,7 @@
+@@ -249,7 +297,7 @@
  });
  
  // 7. DELETE /api/receipts/:id
@@ -122,7 +124,7 @@
      try {
          dbApi.run(`DELETE FROM receipts WHERE id=?`, [parseInt(req.params.id)]);
          res.json({ success: true });
-@@ -265,6 +311,7 @@
+@@ -265,6 +313,7 @@
      try {
          const where = [];
          const params = [];
@@ -130,7 +132,7 @@
          if (req.query.search) {
              const like = `%${req.query.search}%`;
              where.push(`(vehicleMachinery LIKE ? OR itemName LIKE ? OR itemDesc LIKE ? OR issuedTo LIKE ? OR issuedBy LIKE ? OR mrnNum LIKE ? OR category LIKE ?)`);
-@@ -326,7 +373,7 @@
+@@ -326,7 +375,7 @@
      }
  });
  
@@ -139,7 +141,7 @@
      try {
          dbApi.run(`DELETE FROM issues WHERE id=?`, [parseInt(req.params.id)]);
          res.json({ success: true });
-@@ -340,15 +387,16 @@
+@@ -340,15 +389,16 @@
  // ===========================================================================
  app.get('/api/vehicles', (req, res) => {
      try {
@@ -161,7 +163,7 @@
          res.json(rows.map(r => r.v));
      } catch (e) {
          res.status(500).json({ error: e.message });
-@@ -358,7 +406,8 @@
+@@ -358,7 +408,8 @@
  app.get('/api/categories', (req, res) => {
      try {
          const counts = {};
@@ -171,7 +173,7 @@
              .forEach(r => { counts[r.category] = r.c; });
          res.json({ categories: CATEGORIES, counts });
      } catch (e) {
-@@ -376,6 +425,7 @@
+@@ -376,6 +427,7 @@
          const today = new Date().toISOString().split('T')[0];
          const where = [];
          const params = [];
@@ -179,7 +181,7 @@
          if (req.query.search) {
              const like = `%${req.query.search}%`;
              where.push(`(serialNumber LIKE ? OR itemName LIKE ? OR brand LIKE ? OR itemDesc LIKE ? OR currentVehicle LIKE ? OR notes LIKE ?)`);
-@@ -422,8 +472,8 @@
+@@ -422,8 +474,8 @@
                  COUNT(CASE WHEN condition = 'Old' AND state = 'In Store' THEN 1 END) AS oldInStore,
                  COUNT(CASE WHEN condition = 'Expired' OR (expiryDateISO != '' AND expiryDateISO <= ?) THEN 1 END) AS expired,
                  COUNT(CASE WHEN state = 'Installed' THEN 1 END) AS installed
@@ -190,7 +192,7 @@
          res.json(stats);
      } catch (e) {
          res.status(500).json({ error: e.message });
-@@ -433,7 +483,8 @@
+@@ -433,7 +485,8 @@
  app.get('/api/batteries/:id', (req, res) => {
      try {
          const id = parseInt(req.params.id);
@@ -200,7 +202,7 @@
          if (!battery) return res.status(404).json({ error: 'Battery not found' });
          const movements = dbApi.all(`SELECT * FROM battery_movements WHERE batteryId = ? ORDER BY movementDateISO DESC, id DESC`, [id]);
          battery.movements = movements;
-@@ -618,7 +669,7 @@
+@@ -618,7 +671,7 @@
      }
  });
  
@@ -209,7 +211,7 @@
      try {
          const id = parseInt(req.params.id);
          dbApi.transaction(() => {
-@@ -639,6 +690,7 @@
+@@ -639,6 +692,7 @@
  
  app.get('/api/active-items', (req, res) => {
      try {
@@ -217,7 +219,7 @@
          const rows = dbApi.all(`
              WITH item_rec_iss AS (
                  SELECT 
-@@ -661,11 +713,11 @@
+@@ -661,11 +715,11 @@
                          )
                          AND LOWER(TRIM(iss.itemName)) = LOWER(TRIM(i.itemName))
                      ), 0) AS issuedQty
@@ -231,7 +233,7 @@
          res.json(rows);
      } catch (e) {
          res.status(500).json({ error: e.message });
-@@ -674,11 +726,13 @@
+@@ -674,11 +728,13 @@
  
  app.get('/api/fleet', (req, res) => {
      try {
@@ -247,7 +249,7 @@
              ),
              item_stats AS (
                  SELECT 
-@@ -692,7 +746,7 @@
+@@ -692,7 +748,7 @@
                      CASE WHEN i.reqQty > COALESCE((SELECT SUM(qty) FROM receipts r WHERE r.itemId = i.id), 0) AND TRIM(COALESCE(i.reqDateISO, '')) != '' AND i.reqDateISO < DATE('now', 'localtime') THEN 1 ELSE 0 END AS is_overdue,
                      1 AS item_line
                  FROM items i
@@ -256,7 +258,7 @@
              ),
              vehicle_agg AS (
                  SELECT 
-@@ -721,7 +775,7 @@
+@@ -721,7 +777,7 @@
              FROM all_vehicles av
              LEFT JOIN vehicle_agg va ON av.vehicle = va.name
              ORDER BY av.vehicle COLLATE NOCASE ASC
@@ -265,7 +267,7 @@
          res.json(rows);
      } catch (e) {
          res.status(500).json({ error: e.message });
-@@ -733,16 +787,18 @@
+@@ -733,16 +789,18 @@
          const veh = req.query.vehicle;
          if (!veh) return res.status(400).json({ error: 'Vehicle name is required' });
          const trimVeh = veh.trim();
@@ -287,7 +289,7 @@
  
          // Prefill receipts for items
          const itemIds = items.map(item => item.id);
-@@ -760,10 +816,10 @@
+@@ -760,10 +818,10 @@
          
          const issues = dbApi.all(`
              SELECT * FROM issues
@@ -301,7 +303,7 @@
          res.json({ items, issues });
      } catch (e) {
          res.status(500).json({ error: e.message });
-@@ -772,17 +828,18 @@
+@@ -772,17 +830,18 @@
  
  app.get('/api/open-mrns', (req, res) => {
      try {
@@ -323,7 +325,7 @@
          res.json(rows);
      } catch (e) {
          res.status(500).json({ error: e.message });
-@@ -791,12 +848,14 @@
+@@ -791,12 +850,14 @@
  
  app.get('/api/sidebar-stats', (req, res) => {
      try {
@@ -343,7 +345,7 @@
  
          const pendingPricing = dbApi.get(`
              WITH item_pricing AS (
-@@ -806,15 +865,15 @@
+@@ -806,15 +867,15 @@
                      MAX(CASE WHEN r.unitPrice IS NULL OR r.unitPrice = 0 THEN 1 ELSE 0 END) AS has_unpriced,
                      COUNT(r.id) AS recCount
                  FROM items i
@@ -364,7 +366,7 @@
  
          // Stock room in-stock items:
          // We want to count distinct SKUs with currentStock > 0
-@@ -823,13 +882,13 @@
+@@ -823,13 +884,13 @@
                  SELECT LOWER(TRIM(i.itemName)) AS cleanName, SUM(r.qty) AS totalReceived
                  FROM items i
                  JOIN receipts r ON r.itemId = i.id
@@ -380,7 +382,7 @@
                  GROUP BY LOWER(TRIM(itemName))
              ),
              all_names AS (
-@@ -842,9 +901,9 @@
+@@ -842,9 +903,9 @@
              LEFT JOIN received_totals r ON an.cleanName = r.cleanName
              LEFT JOIN issued_totals i ON an.cleanName = i.cleanName
              WHERE (COALESCE(r.totalReceived, 0) - COALESCE(i.totalIssued, 0)) > 0
@@ -392,7 +394,7 @@
  
          res.json({
              totalItems,
-@@ -860,40 +919,42 @@
+@@ -860,40 +921,42 @@
  
  app.get('/api/dashboard/summary', (req, res) => {
      try {
@@ -453,7 +455,7 @@
          const supplierSpend = {};
          supplierSpendRows.forEach(r => {
              supplierSpend[r.supplier] = r.total;
-@@ -913,14 +974,15 @@
+@@ -913,14 +976,15 @@
  
  app.get('/api/dashboard/charts', (req, res) => {
      try {
@@ -472,7 +474,7 @@
          let cumulative = 0;
          const trend = spendTrend.map(row => {
              cumulative += row.dailyTotal;
-@@ -930,10 +992,10 @@
+@@ -930,10 +994,10 @@
          const supplierSpend = dbApi.all(`
              SELECT TRIM(supplierName) AS supplier, SUM(qty * unitPrice) AS total
              FROM receipts
@@ -485,7 +487,7 @@
  
          res.json({ trend, supplierSpend });
      } catch (e) {
-@@ -943,8 +1005,9 @@
+@@ -943,8 +1007,9 @@
  
  app.get('/api/dashboard/inflow', (req, res) => {
      try {
@@ -496,7 +498,7 @@
                  r.id,
                  r.qty,
                  r.deliveryDate,
-@@ -957,9 +1020,9 @@
+@@ -957,9 +1022,9 @@
                  i.vehicleMachinery
              FROM receipts r
              JOIN items i ON r.itemId = i.id
@@ -508,7 +510,7 @@
  
          // Group them inside backend JS to preserve exact frontend nested structures
          const dailyData = {};
-@@ -1036,10 +1099,10 @@
+@@ -1036,10 +1101,10 @@
                  COALESCE((SELECT SUM(qty) FROM receipts r WHERE r.itemId = i.id), 0) AS recQty
              FROM items i
              WHERE i.reqQty > (SELECT COALESCE(SUM(qty), 0) FROM receipts r WHERE r.itemId = i.id)
@@ -522,7 +524,7 @@
          res.json(rows);
      } catch (e) {
          res.status(500).json({ error: e.message });
-@@ -1048,11 +1111,12 @@
+@@ -1048,11 +1113,12 @@
  
  app.get('/api/dashboard/transfers-timeline', (req, res) => {
      try {
@@ -537,7 +539,7 @@
          res.json(rows);
      } catch (e) {
          res.status(500).json({ error: e.message });
-@@ -1061,12 +1125,13 @@
+@@ -1061,12 +1127,13 @@
  
  app.get('/api/all-vehicles', (req, res) => {
      try {
@@ -555,7 +557,7 @@
          res.json(rows.map(r => r.vehicle));
      } catch (e) {
          res.status(500).json({ error: e.message });
-@@ -1075,12 +1140,13 @@
+@@ -1075,12 +1142,13 @@
  
  app.get('/api/all-categories', (req, res) => {
      try {
@@ -573,7 +575,7 @@
          res.json(rows.map(r => r.category));
      } catch (e) {
          res.status(500).json({ error: e.message });
-@@ -1098,6 +1164,12 @@
+@@ -1098,6 +1166,12 @@
          const sort = req.query.sort || 'itemName';
          const order = (req.query.order || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
  
@@ -586,7 +588,7 @@
          const params = [];
          const whereClauses = [];
  
-@@ -1125,13 +1197,13 @@
+@@ -1125,13 +1199,13 @@
                  SELECT LOWER(TRIM(i.itemName)) AS cleanName, MAX(i.itemName) AS itemName, MAX(i.category) AS category, SUM(r.qty) AS totalReceived
                  FROM items i
                  JOIN receipts r ON r.itemId = i.id
@@ -602,7 +604,7 @@
                  GROUP BY LOWER(TRIM(itemName))
              ),
              all_names AS (
-@@ -1161,25 +1233,25 @@
+@@ -1161,25 +1235,25 @@
  
          // Get total count matching filters
          const countRow = dbApi.get(`
@@ -636,7 +638,7 @@
              SELECT 
                  COUNT(*) AS totalSKUs,
                  SUM(CASE WHEN status = 'instock' THEN 1 ELSE 0 END) AS inStock,
-@@ -1187,15 +1259,15 @@
+@@ -1187,15 +1261,15 @@
                  SUM(CASE WHEN status = 'outstock' THEN 1 ELSE 0 END) AS outOfStock,
                  SUM(CASE WHEN status = 'anomaly' THEN 1 ELSE 0 END) AS discrepancies
              FROM inventory_base
@@ -655,7 +657,7 @@
  
          res.json({
              items,
-@@ -1220,10 +1292,12 @@
+@@ -1220,10 +1294,12 @@
      try {
          const cleanName = s(req.query.cleanName).trim().toLowerCase();
          if (!cleanName) return res.status(400).json({ error: 'cleanName is required' });
@@ -669,7 +671,7 @@
                  r.qty,
                  r.deliveryDate,
                  r.purchaseSource,
-@@ -1235,13 +1309,13 @@
+@@ -1235,13 +1311,13 @@
                  i.vehicleMachinery
              FROM receipts r
              JOIN items i ON r.itemId = i.id
@@ -686,7 +688,7 @@
                  qty,
                  issueDate,
                  mrnNum,
-@@ -1250,16 +1324,16 @@
+@@ -1250,16 +1326,16 @@
                  issuedBy,
                  notes
              FROM issues
@@ -707,7 +709,7 @@
  
          res.json({ receipts, issues, linkedItem });
      } catch (e) {
-@@ -1278,6 +1352,7 @@
+@@ -1278,6 +1354,7 @@
          const limit = parseInt(req.query.limit) || null;
          const where = [];
          const params = [];
@@ -715,7 +717,7 @@
  
          if (req.query.search) {
              const like = `%${req.query.search}%`;
-@@ -1325,8 +1400,8 @@
+@@ -1325,8 +1402,8 @@
                  COUNT(*) AS total,
                  COALESCE(SUM(qty), 0) AS totalQty,
                  COUNT(CASE WHEN transferDateISO >= ? THEN 1 END) AS thisMonth
@@ -726,7 +728,7 @@
          res.json(stats);
      } catch (e) {
          res.status(500).json({ error: e.message });
-@@ -1336,7 +1411,8 @@
+@@ -1336,7 +1413,8 @@
  app.get('/api/transfers/:id', (req, res) => {
      try {
          const id = parseInt(req.params.id);
@@ -736,7 +738,7 @@
          if (!transfer) return res.status(404).json({ error: 'Transfer not found' });
          res.json(transfer);
      } catch (e) {
-@@ -1389,7 +1465,7 @@
+@@ -1389,7 +1467,7 @@
      }
  });
  
@@ -745,7 +747,7 @@
      try {
          const id = parseInt(req.params.id);
          dbApi.run(`DELETE FROM material_transfers WHERE id = ?`, [id]);
-@@ -1407,7 +1483,8 @@
+@@ -1407,7 +1485,8 @@
      try {
          const where = [];
          const params = [];
@@ -755,7 +757,7 @@
          if (req.query.search) {
              const like = `%${req.query.search}%`;
              where.push(`(gi.itemName LIKE ? OR gi.partNumber LIKE ? OR gi.specification LIKE ? OR gi.notes LIKE ?)`);
-@@ -1455,6 +1532,8 @@
+@@ -1455,6 +1534,8 @@
  
  app.get('/api/general-items/stats', (req, res) => {
      try {
@@ -764,7 +766,7 @@
          const stats = dbApi.get(`
              WITH item_stocks AS (
                  SELECT gi.id, gi.minStock,
-@@ -1465,19 +1544,19 @@
+@@ -1465,19 +1546,19 @@
                      ORDER BY txDateISO DESC, id DESC
                      LIMIT 1
                  ), 0) AS currentStock
@@ -790,7 +792,7 @@
          res.json({
              totalSKUs: stats.totalSKUs || 0,
              outOfStock: stats.outOfStock || 0,
-@@ -1492,12 +1571,13 @@
+@@ -1492,12 +1573,13 @@
  
  app.get('/api/general-items/racks', (req, res) => {
      try {
@@ -806,7 +808,7 @@
          res.json(rows.map(row => row.r));
      } catch (e) {
          res.status(500).json({ error: e.message });
-@@ -1506,12 +1586,13 @@
+@@ -1506,12 +1588,13 @@
  
  app.get('/api/general-items/subcategories', (req, res) => {
      try {
@@ -822,7 +824,7 @@
          res.json(rows.map(row => row.cat));
      } catch (e) {
          res.status(500).json({ error: e.message });
-@@ -1521,7 +1602,8 @@
+@@ -1521,7 +1604,8 @@
  app.get('/api/general-items/:id', (req, res) => {
      try {
          const id = parseInt(req.params.id);
@@ -832,7 +834,7 @@
          if (!item) return res.status(404).json({ error: 'General Item not found' });
          
          item.currentStock = dbApi.get(`
-@@ -1601,7 +1683,7 @@
+@@ -1601,7 +1685,7 @@
      }
  });
  
@@ -841,7 +843,7 @@
      try {
          const id = parseInt(req.params.id);
          dbApi.transaction(() => {
-@@ -1738,12 +1820,15 @@
+@@ -1738,12 +1822,15 @@
  // ===========================================================================
  app.get('/api/export/excel', (req, res) => {
      try {
