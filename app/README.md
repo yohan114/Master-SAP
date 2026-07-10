@@ -59,6 +59,15 @@ by the live stock balance. All in one app.
 | `seed.js` | minimal masters + `admin`/`foreman`/`viewer` users |
 | `smoke.mjs` | end‑to‑end proof |
 
+## Load your real data
+`migrate-legacy.js` reads the two legacy SQLite books and loads the real masters (items, oil products,
+fleet assets, batteries) into the unified DB — run it after `seed.js` (uses distinct `item_no` prefixes
+so it never clashes with the demo rows). Verified against the real books: **2,743 spare items · 78
+general · 21 oil products · 414 fleet assets · 37 batteries** loaded and served by the app.
+```bash
+STORES_DB=/path/inventory.db OIL_DB=/path/oilbook.db node migrate-legacy.js
+```
+
 ## Run it (local)
 ```bash
 # 1. PostgreSQL 16, load the schema
