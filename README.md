@@ -1,110 +1,121 @@
 # Master‑SAP — UMMS (Unified Master Management System)
 
-**One platform for Transport Stores, Oil/Lubricant, Battery Lifecycle, and Workshop Job‑Card Costing.**
+**One system for Transport Stores, Oil/Lubricant, Battery Lifecycle, and Workshop Job‑Card Costing —
+one login, one database.**
 
-This repository contains the **complete solution blueprint** for consolidating five separate
-systems and Excel processes — stores management, an oil/lubricant stock book, battery tracking,
-workshop job cards & costing, and legacy Excel/backups — into **one centralized system** with
-shared master data, linked transactions, approval workflows, a single stock ledger, full
-traceability, and final job costing.
+What began as a design blueprint is now a **working, deployable application**. Four operations that
+used to be separate apps and Excel books run as **modules of a single master system** on PostgreSQL,
+wired together so a stock or oil issue flows straight into a workshop job's final cost.
 
-> This is an **enterprise architecture & design deliverable** (documentation + reference SQL
-> schema + a UI prototype), engineered so it can be built as a modern web app now and integrated
-> with a full ERP (SAP MM/PM/CO) later — without rework.
-
----
-
-## 1. What problem this solves
-
-| Today (5 silos)                              | Target (UMMS)                                                        |
-|----------------------------------------------|---------------------------------------------------------------------|
-| Separate stores system                       | **Stores / Material Management** module on a shared item master      |
-| Oil / lubricant stock book (Excel)           | **Lubricant** module on the same ledger, traceable by asset & date   |
-| Battery stock tracking (Excel)               | **Battery** module with full serial lifecycle history                |
-| Workshop job cards & costing (manual)        | **Job Card** module with approvals + labour/material/outside costing |
-| Excel files & old system backups             | **Staged migration** into governed masters + opening balances        |
-
-Everything connects through **shared masters** (one item list, one asset/vehicle list, one
-supplier list, one location tree) and a **single append‑only stock ledger**, so one transaction in
-one module correctly affects stock, costing, and reporting everywhere else.
+> Status: the backend of all four domains + a unified web UI + a one‑command deploy kit are **built and
+> tested** (`app/`, 31/31 end‑to‑end), running on the **real migrated data** (2,825 items · 414 fleet
+> assets · 37 batteries · **LKR 13.09M opening stock**). See [`BUILD_BACKLOG.md`](BUILD_BACKLOG.md).
 
 ---
 
-## 2. The blueprint (read in this order)
+## The system (`app/`)
+
+One Node + PostgreSQL app. Shared foundation (auth, RBAC, per‑site scope, `TYPE‑SITE‑YY‑NNNNNN`
+numbering) and a **single moving‑average inventory engine** under four modules:
+
+| Module | What it does |
+|---|---|
+| **Stores** | item master · receive (GRN) · issue · moving‑average stock ledger |
+| **Oil / Lubricant** | receive · issue‑to‑vehicle · consumption‑by‑asset · book‑vs‑physical stock counts |
+| **Battery** | serial‑true lifecycle: register → install → transfer → return → scrap, with full history |
+| **Workshop** | job cards · labour (auto‑rated by grade) · parts · cost roll‑up · variance · close‑gating |
+
+**The unification:** a stores or oil issue can post straight onto a job card, so the job's material
+cost is the **real issued cost at moving‑average valuation** — not a re‑keyed number.
+
+### Run it locally
+```bash
+createdb umms && psql -d umms -f sql/schema.sql
+cd app && npm install
+export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=umms
+npm run seed                 # base roles/users + demo masters
+npm start                    # http://localhost:4000  (login: admin / ChangeMe@Admin1)
+npm run smoke                # 31/31 end-to-end
+```
+Load your real data (from a machine with the legacy SQLite books):
+```bash
+STORES_DB=/path/inventory.db OIL_DB=/path/oilbook.db node migrate-legacy.js   # real catalog
+STORES_DB=/path/inventory.db OIL_DB=/path/oilbook.db node backfill-opening.js  # opening stock
+```
+
+### Deploy it (one command)
+```bash
+sudo DOMAIN=your.domain EMAIL=you@your.domain bash app/deploy/bootstrap-vps.sh
+```
+Stands up **PostgreSQL + the app + nginx TLS** in Docker on a fresh Ubuntu/Debian VPS; the app loads
+its schema and seeds itself on first boot. Full steps: [`app/deploy/README.md`](app/deploy/README.md)
+and [`app/README.md`](app/README.md).
+
+---
+
+## The blueprint (design docs, read in this order)
+
+The application implements this design. Start with the Design Contract.
 
 | # | Document | What's inside |
 |---|----------|---------------|
-| 00 | [Design Contract](docs/00-design-contract.md) | **Start here.** Canonical naming standards, shared masters, numbering, status vocabularies, valuation method, integrity rules. |
-| 01 | [Business Architecture](docs/01-business-architecture.md) | Target‑state in business language; architecture layers; cross‑module connectivity scenario. |
-| 02 | [Module Breakdown](docs/02-module-breakdown.md) | Every module/submodule: purpose, masters, transactions, approvals, reports, alerts, dashboards. |
-| 03 | [Database Design](docs/03-database-design.md) | Relational schema: masters / transactions / movements / history / approvals / costing; keys, fields, ledger & valuation logic. |
-| 04 | [Stock Workflows](docs/04-stock-workflows.md) | Stores, lubricant & battery end‑to‑end workflows, status maps, movement logic, validations, alerts. |
-| 05 | [Job Card & Costing](docs/05-jobcard-and-costing.md) | Full job lifecycle, approvals, workshop execution, labour, cost formulas, close gating, controls. |
-| 06 | [Dashboards & KPIs](docs/06-dashboards-kpi.md) | Executive + operational dashboards, KPI catalog with formulas, alert & exception logic. |
-| 07 | [Roles & Permissions](docs/07-roles-permissions.md) | Role catalog, permission matrix, site‑based visibility, segregation of duties, audit. |
-| 08 | [Data Migration](docs/08-data-migration.md) | Staging, mapping, validation, duplicate detection, reconciliation, phased cutover. |
-| 09 | [UI/UX Design Direction](docs/09-uiux-design.md) | Command‑center design language, sidebar nav, components, status colors, wireframes. |
-| 10 | [Reports & Documents](docs/10-reports-documents.md) | Report catalog + printable document layouts (GRN, job costing sheet, etc.). |
-| 11 | [Integration & Future‑Readiness](docs/11-integration.md) | Excel, barcode/QR, attachments, notifications, API, BI, optional SAP. |
-| 12 | [Roadmap, Appendices & Risks](docs/12-roadmap-appendices-risks.md) | Phase plan, menu tree, master hierarchy, numbering, alert list, MVP vs advanced, risk register. |
-| 13 | [Auth & RBAC Design](docs/13-auth-rbac-design.md) | Login, password hashing, sessions, permission middleware, site scoping — replaces the legacy hard‑coded password. |
-
-**Reference SQL:** [`sql/schema.sql`](sql/schema.sql) — PostgreSQL DDL for the core tables.
-**UI prototype:** [`ui/prototype.html`](ui/prototype.html) — an interactive command‑center mockup.
-**Production gate:** [`PRODUCTION_READINESS.md`](PRODUCTION_READINESS.md) — the P0/P1/P2 go‑live checklist.
-**Migration:** [`migration/`](migration/) — four tested legacy‑import ETLs + costing engine + playbook.
-**Reference auth module:** [`reference/auth-module/`](reference/auth-module/) — runnable Express auth + RBAC + site‑scoping (10/10 smoke tests pass) that replaces the legacy hard‑coded password.
+| 00 | [Design Contract](docs/00-design-contract.md) | **Start here.** Naming, shared masters, numbering, status vocabularies, valuation, integrity rules. |
+| 01 | [Business Architecture](docs/01-business-architecture.md) | Target‑state; architecture layers; cross‑module scenario. |
+| 02 | [Module Breakdown](docs/02-module-breakdown.md) | Every module: masters, transactions, approvals, reports, alerts. |
+| 03 | [Database Design](docs/03-database-design.md) | Relational schema, keys, ledger & valuation logic. |
+| 04 | [Stock Workflows](docs/04-stock-workflows.md) | Stores/lubricant/battery workflows, status maps, validations. |
+| 05 | [Job Card & Costing](docs/05-jobcard-and-costing.md) | Job lifecycle, approvals, labour, cost formulas, close gating. |
+| 06 | [Dashboards & KPIs](docs/06-dashboards-kpi.md) | Executive/operational dashboards, KPI catalog. |
+| 07 | [Roles & Permissions](docs/07-roles-permissions.md) | Role catalog, permission matrix, site visibility, SoD, audit. |
+| 08 | [Data Migration](docs/08-data-migration.md) | Staging, mapping, validation, reconciliation, cutover. |
+| 09 | [UI/UX Direction](docs/09-uiux-design.md) | Command‑center design language, components, wireframes. |
+| 10 | [Reports & Documents](docs/10-reports-documents.md) | Report catalog + printable layouts. |
+| 11 | [Integration & Future‑Readiness](docs/11-integration.md) | Excel, barcode/QR, notifications, API, BI, optional SAP. |
+| 12 | [Roadmap, Appendices & Risks](docs/12-roadmap-appendices-risks.md) | Phase plan, menus, numbering, alerts, risk register. |
+| 13 | [Auth & RBAC Design](docs/13-auth-rbac-design.md) | Login, hashing, sessions, permission middleware, site scoping. |
 
 ---
 
-## 3. Core design decisions (at a glance)
+## Core design decisions
 
-- **Shared masters, zero duplication.** `md_item` holds every material (store item, lubricant,
-  spare, general item, battery model). `md_asset` holds every vehicle/machine/equipment. One
-  supplier, employee, location, and UoM list.
-- **Single stock ledger.** Every receipt, issue, transfer, adjustment and return posts an
-  append‑only row to `mv_stock_ledger`; `inv_stock_balance` is the fast on‑hand + moving‑average
-  cost snapshot.
-- **Effective‑date pricing.** Costing always reads the correct price *as of the transaction date*
-  via `md_price_history`. Un‑priced receipts go to a **pending valuation queue** and trigger
-  revaluation when confirmed.
-- **Serial‑true battery lifecycle.** Every battery movement appends to `hist_battery_event`,
-  preserving original‑vs‑current asset and full history.
-- **Approval‑gated job closure.** A job cannot close until parts are received/accounted, prices are
-  in, labour is captured, outside‑repair costs are entered, and all approvals are complete.
-- **Auditable everywhere.** Standard audit fields on every table; approvals and reversals logged;
-  price/cost edits tracked.
-- **Site‑scoped security.** Normal site users see only their own site's data; managers roll up.
+- **Shared masters, zero duplication.** `md_item` holds every material (store/lubricant/spare/general/
+  battery model); `md_asset` every vehicle/machine. One supplier, employee, location, UoM list.
+- **Single stock ledger.** Every receipt/issue/transfer/adjustment posts an append‑only
+  `mv_stock_ledger` row; `inv_stock_balance` is the on‑hand + moving‑average‑cost snapshot.
+- **Serial‑true battery lifecycle** in `hist_battery_event`, preserving original‑vs‑current asset.
+- **Approval‑gated job closure** — no close while any cost is provisional or before a roll‑up exists.
+- **Auditable, site‑scoped security** — reads and writes are scoped to a user's site(s).
 
-Naming standards, table prefixes (`md_`, `tx_`, `txl_`, `mv_`, `inv_`, `hist_`, `apr_`, `cost_`,
-`stg_`, `sys_`, `sec_`), and numbering (`TYPE-SITE-YY-NNNNNN`) are defined once in the
-[Design Contract](docs/00-design-contract.md).
+Prefixes (`md_`/`tx_`/`txl_`/`mv_`/`inv_`/`hist_`/`cost_`/`sec_`…) and numbering (`TYPE‑SITE‑YY‑NNNNNN`)
+are defined once in the [Design Contract](docs/00-design-contract.md).
 
 ---
 
-## 4. Implementation phases (summary)
-
-| Phase | Focus |
-|-------|-------|
-| **1** | Foundation masters + Stores (ledger, GRN/issue/transfer, valuation) |
-| **2** | Lubricant + Battery (monthly balance, serial lifecycle, warranty) |
-| **3** | Job Card + Costing (approvals, workshop execution, labour, closure) |
-| **4** | Dashboards, analytics, alerts & automation |
-| **5** | Integrations & mobile (barcode/QR, WhatsApp/email, API, BI, optional SAP) |
-
-Full detail, MVP‑vs‑advanced scope, and the risk register are in
-[doc 12](docs/12-roadmap-appendices-risks.md).
-
----
-
-## 5. Repository layout
+## Repository layout
 
 ```
 Master-SAP/
-├── README.md                     # this file
-├── docs/                         # the solution blueprint (00–12)
-├── sql/
-│   └── schema.sql                # PostgreSQL reference DDL for core tables
-└── ui/
-    └── prototype.html            # command-center UI prototype
+├── app/                 # ★ the unified system — Node + PostgreSQL (4 modules, web UI, deploy kit)
+│   ├── routes/          #   stores · oil · battery · jobcards · auth
+│   ├── lib/inventory.js #   shared moving-average inventory engine
+│   ├── public/          #   the single-page web UI
+│   ├── deploy/          #   Docker Compose (Postgres + app + nginx) + one-command VPS bootstrap
+│   ├── migrate-legacy.js, backfill-opening.js, seed.js, smoke.mjs
+│   └── README.md
+├── sql/schema.sql       # the validated 74-table PostgreSQL schema the app runs on
+├── docs/                # the solution blueprint (00–13)
+├── reference/           # storesdb security port + runnable auth reference (the earlier, stores-only path)
+├── deploy/              # go-live kit for the standalone secured stores app (localhost + VPS)
+├── migration/           # tested legacy-import ETLs + costing engine + playbook
+├── ops/                 # backup/restore drills, nginx TLS config, reconciliation
+├── ui/prototype.html    # command-center UI prototype
+├── BUILD_BACKLOG.md     # what's built vs what's left
+└── PRODUCTION_READINESS.md  # P0/P1/P2 go-live checklist
 ```
+
+## Go‑live checklist
+1. **DNS** — point a domain at your VPS; open ports 80/443.
+2. **Deploy** — `sudo DOMAIN=… EMAIL=… bash app/deploy/bootstrap-vps.sh`.
+3. **Load your data** — `migrate-legacy.js` then `backfill-opening.js` (via `docker compose … exec app`).
+4. **Lock down** — change the seeded passwords; back up the `umms-pgdata` volume nightly; cert
+   auto‑renewal cron is printed by the bootstrap.
