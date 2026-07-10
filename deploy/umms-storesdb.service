@@ -1,0 +1,28 @@
+# systemd unit for the direct (non-Docker) deployment.
+# Install:  sudo cp deploy/umms-storesdb.service /etc/systemd/system/
+#           sudo systemctl daemon-reload && sudo systemctl enable --now umms-storesdb
+# Assumes: a dedicated 'umms' user, the ported app in /opt/umms/storesdb, node on PATH.
+[Unit]
+Description=UMMS storesdb (secured stores app)
+After=network.target
+
+[Service]
+Type=simple
+User=umms
+Group=umms
+WorkingDirectory=/opt/umms/storesdb
+EnvironmentFile=/opt/umms/storesdb/.env
+ExecStart=/usr/bin/node server.js
+Restart=on-failure
+RestartSec=3
+# Hardening
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/umms/storesdb
+AmbientCapabilities=
+CapabilityBoundingSet=
+
+[Install]
+WantedBy=multi-user.target

@@ -120,7 +120,11 @@ node seed-users.js                                         # creates sec_* table
 # restart the app
 ```
 
-The patch: adds `cookie-parser` + auth wiring after `express.json`; mounts `/auth`; **deletes
+> **Going live?** Don't apply this by hand — use the turnkey kit in **`deploy/`** (`apply-port.sh` +
+> Docker/systemd + nginx TLS + `RUNBOOK.md`). It runs exactly this patch and was verified end‑to‑end.
+
+The patch: adds `cookie-parser` + auth wiring after `express.json`; sets an env‑gated `trust proxy`;
+adds an unauthenticated `/health` probe; mounts `/auth`; **deletes
 `verifyDeletePassword` and the `'E&CWorkshop'` constant** and gates all 6 delete routes with
 `requirePerm('STORES.DELETE')`; adds a single **`/api` guard** where **every read requires a valid
 session** (so results can be site‑scoped and nothing leaks to anonymous callers) and mutations
