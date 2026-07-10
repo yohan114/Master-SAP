@@ -16,6 +16,7 @@ app.use('/api', authMiddleware);                 // everything below requires a 
 app.get('/api/me', (req, res) => res.json({ user: req.user, perms: [...req.perms], sites: [...req.sites] }));
 app.use('/api/jobcards', require('./routes/jobcards'));
 app.use('/api/stores', require('./routes/stores'));
+app.use('/api/oil', require('./routes/oil'));
 
 const PORT = process.env.PORT || 4000;
 async function start() {

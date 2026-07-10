@@ -4,11 +4,12 @@ const { q, one, tx } = require('./db');
 const { hashPassword } = require('./auth/password');
 
 const PERMS = ['ADMIN.ALL', 'READ.ALL_SITES', 'JOB.WRITE', 'JOB.LABOUR', 'JOB.PARTS', 'JOB.COST', 'JOB.CLOSE',
-  'STORES.RECEIVE', 'STORES.ISSUE', 'STORES.READ'];
+  'STORES.RECEIVE', 'STORES.ISSUE', 'STORES.READ', 'OIL.RECEIVE', 'OIL.ISSUE', 'OIL.COUNT', 'OIL.READ'];
 const ROLES = {
   system_admin: ['ADMIN.ALL', 'READ.ALL_SITES'],
-  foreman:      ['JOB.WRITE', 'JOB.LABOUR', 'JOB.PARTS', 'JOB.COST', 'JOB.CLOSE', 'STORES.ISSUE', 'STORES.READ'],
-  storekeeper:  ['STORES.RECEIVE', 'STORES.ISSUE', 'STORES.READ'],
+  foreman:      ['JOB.WRITE', 'JOB.LABOUR', 'JOB.PARTS', 'JOB.COST', 'JOB.CLOSE', 'STORES.ISSUE', 'STORES.READ',
+                 'OIL.ISSUE', 'OIL.READ'],
+  storekeeper:  ['STORES.RECEIVE', 'STORES.ISSUE', 'STORES.READ', 'OIL.RECEIVE', 'OIL.ISSUE', 'OIL.COUNT', 'OIL.READ'],
   viewer:       [],
 };
 const USERS = [
@@ -80,6 +81,11 @@ const USERS = [
       VALUES('SP-0001','Brake Pad Set','SPARE',$1,$2,$3) ON CONFLICT (item_no) DO NOTHING`, [cat.category_id, uomId, CB]);
     await run(`INSERT INTO md_item(item_no, item_name, item_type, base_uom_id, created_by)
       VALUES('GN-0001','Shop Rag','GENERAL',$1,$2) ON CONFLICT (item_no) DO NOTHING`, [uomId, CB]);
+    const litre = (await run(`INSERT INTO md_uom(uom_code, uom_name, uom_type, created_by) VALUES('LTR','Litre','VOLUME',$1)
+      ON CONFLICT (uom_code) DO NOTHING RETURNING uom_id`, [CB]))[0]
+      || (await run("SELECT uom_id FROM md_uom WHERE uom_code='LTR'"))[0];
+    await run(`INSERT INTO md_item(item_no, item_name, item_type, base_uom_id, created_by)
+      VALUES('LB-0001','Engine Oil 15W-40','LUBRICANT',$1,$2) ON CONFLICT (item_no) DO NOTHING`, [litre.uom_id, CB]);
 
     await run(`INSERT INTO md_asset(asset_no, asset_name, asset_class, site_id, created_by)
       VALUES('VEH-0001','Tipper Truck 01','VEHICLE',$1,$2) ON CONFLICT (asset_no) DO NOTHING`, [siteId, CB]);
@@ -101,6 +107,7 @@ const USERS = [
      (SELECT asset_id FROM md_asset WHERE asset_no='VEH-0001') asset,
      (SELECT item_id FROM md_item WHERE item_no='SP-0001') spare,
      (SELECT item_id FROM md_item WHERE item_no='GN-0001') general,
+     (SELECT item_id FROM md_item WHERE item_no='LB-0001') lube,
      (SELECT employee_id FROM md_employee WHERE employee_no='EMP-0001') tech`);
   console.log('Seeded. Logins: admin/ChangeMe@Admin1  foreman/ChangeMe@Fore1  viewer/ChangeMe@View1');
   console.log('Demo ids:', JSON.stringify(ids));

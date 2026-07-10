@@ -1,11 +1,11 @@
 # UMMS app (PostgreSQL) — one unified system
 
 **One system, one login, one database** on the validated 74‑table PostgreSQL schema (`sql/schema.sql`) —
-not separate apps. Shared foundation (auth, RBAC, site‑scope, numbering) with two modules live so far:
-**Stores** and **Workshop Job‑Card + Costing**, wired together so real material cost flows from a stock
-issue into a job's final cost.
+not separate apps. Shared foundation (auth, RBAC, site‑scope, numbering) and a **single inventory
+engine** (`lib/inventory.js`) under three modules: **Stores**, **Oil/Lubricant**, and **Workshop
+Job‑Card + Costing** — wired together so a stock or oil issue flows straight into a job's final cost.
 
-## What works (verified end‑to‑end — `npm run smoke`, 17/17)
+## What works (verified end‑to‑end — `npm run smoke`, 22/22)
 
 **One‑system integration (the point):** receive parts into stores → moving‑average cost rolls forward
 (10@1500 + 10@1700 → **1,600**) → issue to a workshop job → the issue **auto‑posts as a job part** →
@@ -17,6 +17,13 @@ by the live stock balance. All in one app.
 - **Issue** — checks the live balance, values at MWAC, posts an `OUT` movement + issue document, and —
   when `jobcard_id` is given — **creates the job part**, so stores and workshop are one flow.
 - **Stock / items** — on‑hand, moving‑avg cost, and stock value per item‑location (site‑scoped).
+
+### Oil / Lubricant module (`routes/oil.js`)
+- **Receive / issue** on the same engine — an oil issue requires a **vehicle/machine** (`asset_id`) and
+  can also post to a job card. Non‑lubricants are rejected.
+- **Consumption by asset** — litres + value of each lubricant issued per vehicle over a date range
+  (spots abnormal consumption / leaks).
+- **Stock count** — physical vs book with variance and an optional auto‑adjust (`ADJ` movement).
 
 ### Workshop module (`routes/jobcards.js`)
 - **Auth + RBAC** — session login; `requirePerm` gates every write (`viewer` cannot create a job → 403).

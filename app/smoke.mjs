@@ -21,6 +21,7 @@ const ids = (await pool.query(`SELECT
   (SELECT asset_id FROM md_asset WHERE asset_no='VEH-0001') asset,
   (SELECT item_id FROM md_item WHERE item_no='SP-0001') spare,
   (SELECT item_id FROM md_item WHERE item_no='GN-0001') general,
+  (SELECT item_id FROM md_item WHERE item_no='LB-0001') lube,
   (SELECT employee_id FROM md_employee WHERE employee_no='EMP-0001') tech`)).rows[0];
 
 console.log('AUTH + RBAC');
@@ -80,6 +81,22 @@ const cost3 = await api(`/api/jobcards/${j3}/cost`, foreman.cookie, 'POST');
 A('job material cost now = the real issued cost (4800)', cost3.body.material_cost === 4800 && cost3.body.total_job_cost === 4800, cost3.body);
 
 A('over-issue is blocked (insufficient stock)', (await api('/api/stores/issue', foreman.cookie, 'POST', { item_id: ids.spare, location_id: ids.site, qty: 9999, jobcard_id: j3 })).status === 400);
+
+console.log('\nOIL/LUBRICANT MODULE (same engine, consumption by vehicle, stock count)');
+// receive 200 L @ 950, issue 40 L to the tipper truck
+await api('/api/oil/receive', keeper.cookie, 'POST', { item_id: ids.lube, location_id: ids.site, qty: 200, unit_cost: 950 });
+const oIssue = await api('/api/oil/issue', keeper.cookie, 'POST', { item_id: ids.lube, location_id: ids.site, qty: 40, asset_id: ids.asset });
+A('oil issue 40L @ 950 -> line 38000, stock 160', oIssue.body.line_amt === 38000 && oIssue.body.on_hand_qty === 160, oIssue.body);
+A('oil issue requires an asset (400 without)', (await api('/api/oil/issue', keeper.cookie, 'POST', { item_id: ids.lube, location_id: ids.site, qty: 5 })).status === 400);
+A('non-lubricant rejected by oil module (400)', (await api('/api/oil/issue', keeper.cookie, 'POST', { item_id: ids.spare, location_id: ids.site, qty: 1, asset_id: ids.asset })).status === 400);
+
+const cons = await api('/api/oil/consumption', admin.cookie);
+const truck = (cons.body.rows || []).find((r) => r.item_no === 'LB-0001');
+A('consumption-by-asset shows 40L / LKR 38,000 for the truck', truck && Number(truck.qty_issued) === 40 && Number(truck.value_issued) === 38000, truck);
+
+// physical count finds 155 vs book 160 -> variance -5, auto-adjust
+const count = await api('/api/oil/count', keeper.cookie, 'POST', { item_id: ids.lube, location_id: ids.site, counted_qty: 155 });
+A('stock count 155 vs book 160 -> variance -5, adjusted', count.body.variance === -5 && count.body.adjusted === true, count.body);
 
 await pool.end();
 console.log(`\n${pass} passed, ${fail} failed`);

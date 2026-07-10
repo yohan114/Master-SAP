@@ -25,11 +25,11 @@ Nothing to *build* — just run it. Everything here is scripted + verified.
 ## Tier 1 — Oil/Lubricant as a module on the unified platform  🟠 (unblocked)
 *(Direction changed to one system, so this is no longer "secure the separate oil app" — it's build the
 oil module here + migrate the data. No dependency on the oil app's source.)*
-- [ ] 🟠 Build the **Oil module** on the platform: products, issue ledger (its `transactions` model),
-  consumption by fleet asset, stock counts/variance — reusing the shared auth/site‑scope/numbering
+- [x] 🟠 Build the **Oil module** on the platform: products, receive/issue (shared engine),
+  consumption by fleet asset, stock counts/variance — **done & verified** (22/22)
+- [x] 🟢 Oil issues flow into job cost the same way stores issues do — **done** (shared engine)
 - [ ] 🟠 **Migrate** the real `oilbook` data (21 products · 1,691 ledger txns · 414 fleet assets) into
   the unified PostgreSQL (map to `md_item`/`md_asset`/`mv_stock_ledger`)
-- [ ] 🟢 Oil issues flow into job cost the same way stores issues already do (link is built)
 
 ## Tier 2 — Workshop: Job Cards + Final Costing  🟠→🔴 (weeks) — **STARTED, running on PostgreSQL**
 The backend is live in `app/` on the real schema (verified `npm run smoke`, 12/12).
