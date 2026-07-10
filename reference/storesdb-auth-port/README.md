@@ -40,14 +40,27 @@ RBAC, and an audit trail**. Implements `docs/13-auth-rbac-design.md` inside the 
 | MFA‑enabled `admin` login with a **valid** TOTP code | **200** |
 | Non‑MFA `keeper` login (unaffected) | **200** |
 
+**Site‑scoped visibility** — proved end‑to‑end on the real `inventory.db` (4000 items, 299 issues,
+37 batteries, 93 transfers, 78 general items) with 10/4/3/2/5 rows moved to a second site:
+
+| Check | Result |
+|---|---|
+| Unauthenticated `GET /api/items`, `/api/batteries` (reads now require a session) | **401** |
+| `admin` (all sites) sees **totals** — items 4000 · issues 299 · batteries 37 · transfers 93 · general 78 | ✅ |
+| site‑1 `keeper` sees **only site 1** — 3990 · 295 · 34 · 91 · 73 | ✅ |
+| site‑2 keeper sees **only site 2** — 10 · 4 · 3 · 2 · 5 | ✅ |
+| Both the paginated (`total`) and unpaginated (array) `/api/items` paths are scoped | ✅ |
+
+*(20/20 assertions pass — the full run is reproducible with the two‑site test in this README's notes.)*
+
 ## Files
 | File | Purpose |
 |---|---|
 | `auth/password.js` | argon2id → scrypt hashing (no native build needed) |
 | `auth/authMiddleware.js` | session cookie → user + permissions |
-| `auth/rbac.js` | `requirePerm()` + `siteScope()` |
+| `auth/rbac.js` | `requirePerm()` + `siteScope()` + **`scopeWhere(req, alias)`** (row‑level site filter as a bare `WHERE` condition) |
 | `auth/audit.js` | append‑only `audit_log` writes |
-| `auth/schema.js` | `ensure()` creates the `sec_*` + `audit_log` tables in `inventory.db` |
+| `auth/schema.js` | `ensure()` creates the `sec_*` + `audit_log` tables **and adds a `site_id` column (backfilled to the home site) to the row‑bearing stores tables** |
 | `auth/routes.js` | `POST /auth/login` (rate‑limited + lockout + **MFA second‑factor step**) · `POST /auth/logout` |
 | `auth/totp.js` | zero‑dependency RFC 6238 TOTP (base32, HMAC‑SHA1, `verifyTotp` with ±1 step window) |
 | `seed-users.js` | roles/permissions + first admin/keeper/pricing users |
@@ -67,16 +80,25 @@ node seed-users.js                                         # creates sec_* table
 
 The patch: adds `cookie-parser` + auth wiring after `express.json`; mounts `/auth`; **deletes
 `verifyDeletePassword` and the `'E&CWorkshop'` constant** and gates all 6 delete routes with
-`requirePerm('STORES.DELETE')`; adds a single **`/api` write guard** (POST/PUT/PATCH → auth +
-`STORES.PRICE` / `STORES.ISSUE` / `STORES.TRANSFER` / `STORES.WRITE` by route, GET reads left open);
-and gates the tracker UI behind login (unauthenticated → `/login.html`).
+`requirePerm('STORES.DELETE')`; adds a single **`/api` guard** where **every read requires a valid
+session** (so results can be site‑scoped and nothing leaks to anonymous callers) and mutations
+additionally need `STORES.PRICE` / `STORES.ISSUE` / `STORES.TRANSFER` / `STORES.WRITE` by route;
+splices **`scopeWhere(req)` into the core list reads** (`/api/items`, `/api/issues`,
+`/api/transfers`, `/api/general-items`, `/api/batteries`) so a keeper only sees their assigned
+site(s); and gates the tracker UI behind login (unauthenticated → `/login.html`).
 
 ## Before go‑live
 - **Change the seeded passwords** immediately (they're placeholders) and force first‑login change.
 - Set `NODE_ENV=production` so session cookies are `Secure`; terminate TLS at the proxy
   (`ops/proxy/nginx-umms.conf`) and `app.set('trust proxy', 1)`.
-- Review the route→permission mapping in `permForMutation()` against your exact routes. Site‑scoping
-  (`siteScope`) is ready to wire once the stores tables carry a `site_id`.
+- Review the route→permission mapping in `permForMutation()` against your exact routes.
+- **Site‑scoping is wired**: `schema.js` adds `site_id` to the stores tables (existing rows →
+  `HOME_SITE_ID`, default 1), and the core list reads filter by the user's `sec_user_site`
+  assignment (admins / `READ.ALL_SITES` see everything). Give each real site an id, assign keepers
+  with `INSERT INTO sec_user_site(user_id, location_id)`, and set `site_id` on new rows as you create
+  them. The **dashboard/aggregate** endpoints (`/api/dashboard/*`, `/api/sidebar-stats`,
+  `/api/inventory`, `*/stats`) still report all‑site figures — apply the same one‑line `scopeWhere(req)`
+  splice to each before exposing them to site‑restricted users.
 - **MFA is built in** (`auth/totp.js`; `login` enforces the second factor when `mfa_enabled=1`).
   `schema.js` adds the `mfa_secret`/`mfa_enabled` columns automatically. Enrol admin/finance at
   go‑live: set a secret, have them scan the `otpauth://` URI, then flip `mfa_enabled=1`.

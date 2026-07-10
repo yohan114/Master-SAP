@@ -17,4 +17,18 @@ function siteScope(req, params = []) {
   return { clause: ` AND site_id IN (${sites.map(() => '?').join(',')})`, params: [...params, ...sites] };
 }
 
-module.exports = { requirePerm, siteScope };
+// Row-level scope as a BARE boolean condition, for routes that build a `where[]`
+// array and join it into a WHERE. Returns { cond, params }:
+//   cond === ''       -> all-site user, no restriction (push nothing)
+//   cond === '1=0'    -> authenticated but no site assigned -> sees nothing
+//   cond === '<a>.site_id IN (?,?)' -> restrict to the user's assigned sites
+// `alias` is the table alias in the query (e.g. 'i' -> 'i.site_id'); omit for a bare column.
+function scopeWhere(req, alias) {
+  const col = alias ? `${alias}.site_id` : 'site_id';
+  if (!req.perms || req.perms.has('READ.ALL_SITES') || req.perms.has('ADMIN.ALL')) return { cond: '', params: [] };
+  const sites = [...(req.sites || [])];
+  if (!sites.length) return { cond: '1=0', params: [] };
+  return { cond: `${col} IN (${sites.map(() => '?').join(',')})`, params: sites };
+}
+
+module.exports = { requirePerm, siteScope, scopeWhere };

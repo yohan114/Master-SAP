@@ -1,6 +1,14 @@
 // Ensures the sec_* + audit_log tables exist in inventory.db. Call once at startup (idempotent).
 const { exec } = require('../db');
 
+// Home site for existing single-site data. Legacy rows all belong to one physical
+// store (E&C Workshop); they are backfilled to this id so today's users see no change.
+const HOME_SITE_ID = Number(process.env.HOME_SITE_ID || 1);
+
+// Row-bearing stores tables that carry per-site data and are site-scoped on read.
+const SITE_TABLES = ['items', 'issues', 'material_transfers', 'general_items', 'batteries',
+  'receipts', 'general_item_transactions', 'battery_movements'];
+
 function ensure() {
   exec(`
     CREATE TABLE IF NOT EXISTS sec_user (
@@ -25,6 +33,15 @@ function ensure() {
     "ALTER TABLE sec_user ADD COLUMN mfa_secret TEXT",
     "ALTER TABLE sec_user ADD COLUMN mfa_enabled INTEGER NOT NULL DEFAULT 0",
   ]) { try { exec(alter); } catch (_) { /* column already exists */ } }
+
+  // Site column for row-level scoping. SQLite fills existing rows with the DEFAULT,
+  // so legacy data lands on the home site automatically; a NULL guard covers any
+  // table that already had the column added without one.
+  for (const t of SITE_TABLES) {
+    try { exec(`ALTER TABLE ${t} ADD COLUMN site_id INTEGER NOT NULL DEFAULT ${HOME_SITE_ID}`); }
+    catch (_) { /* column already exists (or table absent) */ }
+    try { exec(`UPDATE ${t} SET site_id = ${HOME_SITE_ID} WHERE site_id IS NULL`); } catch (_) {}
+  }
 }
 
-module.exports = { ensure };
+module.exports = { ensure, HOME_SITE_ID, SITE_TABLES };

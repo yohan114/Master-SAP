@@ -1,6 +1,6 @@
 --- server.orig.js	2026-07-09 14:38:18.825564949 +0000
-+++ server.js	2026-07-09 14:48:30.273815382 +0000
-@@ -26,13 +26,43 @@
++++ server.js	2026-07-10 02:48:48.800529151 +0000
+@@ -26,13 +26,48 @@
  
  app.use(express.json({ limit: '100mb' }));
  
@@ -10,11 +10,13 @@
 +require('./auth/schema').ensure();
 +const authRoutes = require('./auth/routes');
 +const { authMiddleware } = require('./auth/authMiddleware');
-+const { requirePerm } = require('./auth/rbac');
++const { requirePerm, scopeWhere } = require('./auth/rbac');
 +const requireAuthPerm = (code) => [authMiddleware, requirePerm(code)];
 +app.use('/auth', authRoutes);
 +
-+// [UMMS] gate all /api writes with RBAC (GET reads stay open; DELETE gated per-route above)
++// [UMMS] gate all /api requests. Reads require a valid session (so results can be
++// site-scoped and nothing leaks to the unauthenticated); mutations additionally need
++// the mapped permission; DELETE routes carry their own requireAuthPerm inline.
 +function permForMutation(req) {
 +  const p = (req.baseUrl || '') + req.path;
 +  if (/^\/api\/receipts\//.test(p)) return 'STORES.PRICE';   // updating a receipt = pricing / GRN
@@ -24,8 +26,11 @@
 +}
 +app.use('/api', (req, res, next) => {
 +  const m = req.method;
-+  if (m === 'GET' || m === 'HEAD' || m === 'OPTIONS' || m === 'DELETE') return next();
-+  authMiddleware(req, res, () => requirePerm(permForMutation(req))(req, res, next));
++  if (m === 'OPTIONS' || m === 'DELETE') return next();        // delete routes gate themselves
++  authMiddleware(req, res, () => {                             // all reads + writes require a session
++    if (m === 'GET' || m === 'HEAD') return next();            // read: authenticated, then site-scoped in-route
++    return requirePerm(permForMutation(req))(req, res, next);  // write: also needs the permission
++  });
 +});
 +// [UMMS] serve the tracker UI only to authenticated users
 +function isAuthed(req) {
@@ -45,7 +50,38 @@
  
  // --- helpers ----------------------------------------------------------------
  const s = (v) => (v === null || v === undefined) ? '' : String(v);
-@@ -175,17 +205,10 @@
+@@ -51,9 +86,13 @@
+ };
+ 
+ // Build the item-level WHERE clause shared by list + count queries.
+-function buildItemWhere(q) {
++// Takes the request so the row-level site scope is folded into the same clause.
++function buildItemWhere(req) {
++    const q = req.query;
+     const where = [];
+     const params = [];
++    const sc = scopeWhere(req, 'i');
++    if (sc.cond) { where.push(sc.cond); params.push(...sc.params); }
+     if (q.search) {
+         const like = `%${q.search}%`;
+         where.push(`(i.mrnNum LIKE ? OR i.itemName LIKE ? OR i.vehicleMachinery LIKE ? OR i.itemDesc LIKE ? OR i.category LIKE ? OR EXISTS(SELECT 1 FROM receipts rr WHERE rr.itemId=i.id AND (rr.grnNumber LIKE ? OR rr.invoiceNumber LIKE ? OR rr.supplierName LIKE ?)))`);
+@@ -108,11 +147,13 @@
+ 
+         // Unpaginated: return the whole dataset (used by dashboard/fleet/dropdowns).
+         if (!page || !limit) {
+-            const items = dbApi.all(`SELECT ${computed} FROM items i ORDER BY i.reqDateISO DESC, i.id DESC`);
++            const sc = scopeWhere(req, 'i');
++            const w = sc.cond ? `WHERE ${sc.cond}` : '';
++            const items = dbApi.all(`SELECT ${computed} FROM items i ${w} ORDER BY i.reqDateISO DESC, i.id DESC`, sc.params);
+             return res.json(attachReceipts(items));
+         }
+ 
+-        const { clause, params } = buildItemWhere(req.query);
++        const { clause, params } = buildItemWhere(req);
+         const tab = filterTabClause(req.query.filter);
+         const outerWhere = tab ? `WHERE ${tab}` : '';
+ 
+@@ -175,17 +216,10 @@
      }
  });
  
@@ -65,7 +101,7 @@
      try {
          const id = parseInt(req.params.id);
          dbApi.transaction(() => {
-@@ -249,7 +272,7 @@
+@@ -249,7 +283,7 @@
  });
  
  // 7. DELETE /api/receipts/:id
@@ -74,7 +110,15 @@
      try {
          dbApi.run(`DELETE FROM receipts WHERE id=?`, [parseInt(req.params.id)]);
          res.json({ success: true });
-@@ -326,7 +349,7 @@
+@@ -265,6 +299,7 @@
+     try {
+         const where = [];
+         const params = [];
++        { const sc = scopeWhere(req); if (sc.cond) { where.push(sc.cond); params.push(...sc.params); } }
+         if (req.query.search) {
+             const like = `%${req.query.search}%`;
+             where.push(`(vehicleMachinery LIKE ? OR itemName LIKE ? OR itemDesc LIKE ? OR issuedTo LIKE ? OR issuedBy LIKE ? OR mrnNum LIKE ? OR category LIKE ?)`);
+@@ -326,7 +361,7 @@
      }
  });
  
@@ -83,7 +127,15 @@
      try {
          dbApi.run(`DELETE FROM issues WHERE id=?`, [parseInt(req.params.id)]);
          res.json({ success: true });
-@@ -618,7 +641,7 @@
+@@ -376,6 +411,7 @@
+         const today = new Date().toISOString().split('T')[0];
+         const where = [];
+         const params = [];
++        { const sc = scopeWhere(req); if (sc.cond) { where.push(sc.cond); params.push(...sc.params); } }
+         if (req.query.search) {
+             const like = `%${req.query.search}%`;
+             where.push(`(serialNumber LIKE ? OR itemName LIKE ? OR brand LIKE ? OR itemDesc LIKE ? OR currentVehicle LIKE ? OR notes LIKE ?)`);
+@@ -618,7 +654,7 @@
      }
  });
  
@@ -92,7 +144,15 @@
      try {
          const id = parseInt(req.params.id);
          dbApi.transaction(() => {
-@@ -1389,7 +1412,7 @@
+@@ -1278,6 +1314,7 @@
+         const limit = parseInt(req.query.limit) || null;
+         const where = [];
+         const params = [];
++        { const sc = scopeWhere(req); if (sc.cond) { where.push(sc.cond); params.push(...sc.params); } }
+ 
+         if (req.query.search) {
+             const like = `%${req.query.search}%`;
+@@ -1389,7 +1426,7 @@
      }
  });
  
@@ -101,7 +161,17 @@
      try {
          const id = parseInt(req.params.id);
          dbApi.run(`DELETE FROM material_transfers WHERE id = ?`, [id]);
-@@ -1601,7 +1624,7 @@
+@@ -1407,7 +1444,8 @@
+     try {
+         const where = [];
+         const params = [];
+-        
++        { const sc = scopeWhere(req, 'gi'); if (sc.cond) { where.push(sc.cond); params.push(...sc.params); } }
++
+         if (req.query.search) {
+             const like = `%${req.query.search}%`;
+             where.push(`(gi.itemName LIKE ? OR gi.partNumber LIKE ? OR gi.specification LIKE ? OR gi.notes LIKE ?)`);
+@@ -1601,7 +1639,7 @@
      }
  });
  
