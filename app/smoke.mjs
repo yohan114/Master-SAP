@@ -22,6 +22,8 @@ const ids = (await pool.query(`SELECT
   (SELECT item_id FROM md_item WHERE item_no='SP-0001') spare,
   (SELECT item_id FROM md_item WHERE item_no='GN-0001') general,
   (SELECT item_id FROM md_item WHERE item_no='LB-0001') lube,
+  (SELECT item_id FROM md_item WHERE item_no='BT-0001') batmodel,
+  (SELECT asset_id FROM md_asset WHERE asset_no='VEH-0002') asset2,
   (SELECT employee_id FROM md_employee WHERE employee_no='EMP-0001') tech`)).rows[0];
 
 console.log('AUTH + RBAC');
@@ -97,6 +99,24 @@ A('consumption-by-asset shows 40L / LKR 38,000 for the truck', truck && Number(t
 // physical count finds 155 vs book 160 -> variance -5, auto-adjust
 const count = await api('/api/oil/count', keeper.cookie, 'POST', { item_id: ids.lube, location_id: ids.site, counted_qty: 155 });
 A('stock count 155 vs book 160 -> variance -5, adjusted', count.body.variance === -5 && count.body.adjusted === true, count.body);
+
+console.log('\nBATTERY MODULE (serial-true lifecycle + history)');
+const reg = await api('/api/battery/register', keeper.cookie, 'POST', { serial_no: 'BAT-SN-777', item_id: ids.batmodel, location_id: ids.site, capacity_ah: 150, acquisition_cost: 22000 });
+A('register battery -> IN_STOCK', reg.body.battery_status === 'IN_STOCK' && reg.body.battery_id, reg.body);
+const bid = reg.body.battery_id;
+A('duplicate serial rejected', (await api('/api/battery/register', keeper.cookie, 'POST', { serial_no: 'BAT-SN-777', item_id: ids.batmodel, location_id: ids.site })).status === 400);
+A('install on truck -> IN_SERVICE', (await api(`/api/battery/${bid}/install`, foreman.cookie, 'POST', { asset_id: ids.asset })).body.battery_status === 'IN_SERVICE');
+A('cannot install an in-service battery again -> 409', (await api(`/api/battery/${bid}/install`, foreman.cookie, 'POST', { asset_id: ids.asset2 })).status === 409);
+A('transfer to excavator -> IN_SERVICE on new asset', (await api(`/api/battery/${bid}/transfer`, foreman.cookie, 'POST', { asset_id: ids.asset2 })).body.current_asset_id === Number(ids.asset2));
+A('return to store -> IN_STOCK', (await api(`/api/battery/${bid}/return`, foreman.cookie, 'POST', {})).body.battery_status === 'IN_STOCK');
+A('scrap -> SCRAPPED', (await api(`/api/battery/${bid}/scrap`, keeper.cookie, 'POST', { reason: 'end of life' })).body.battery_status === 'SCRAPPED');
+
+const hist = await api(`/api/battery/${bid}`, admin.cookie);
+const types = (hist.body.history || []).map((h) => h.event_type);
+A('full history preserved: RECEIVED→INSTALLED→TRANSFERRED→RETURNED→SCRAPPED',
+  JSON.stringify(types) === JSON.stringify(['RECEIVED', 'INSTALLED', 'TRANSFERRED', 'RETURNED', 'SCRAPPED']), types);
+A('original vs current asset both preserved (original=truck, current=null after scrap)',
+  Number(hist.body.original_asset_id) === Number(ids.asset) && hist.body.current_asset_id === null, { o: hist.body.original_asset_id, c: hist.body.current_asset_id });
 
 await pool.end();
 console.log(`\n${pass} passed, ${fail} failed`);

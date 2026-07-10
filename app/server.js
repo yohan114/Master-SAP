@@ -17,6 +17,7 @@ app.get('/api/me', (req, res) => res.json({ user: req.user, perms: [...req.perms
 app.use('/api/jobcards', require('./routes/jobcards'));
 app.use('/api/stores', require('./routes/stores'));
 app.use('/api/oil', require('./routes/oil'));
+app.use('/api/battery', require('./routes/battery'));
 
 const PORT = process.env.PORT || 4000;
 async function start() {

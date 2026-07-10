@@ -2,10 +2,11 @@
 
 **One system, one login, one database** on the validated 74‑table PostgreSQL schema (`sql/schema.sql`) —
 not separate apps. Shared foundation (auth, RBAC, site‑scope, numbering) and a **single inventory
-engine** (`lib/inventory.js`) under three modules: **Stores**, **Oil/Lubricant**, and **Workshop
-Job‑Card + Costing** — wired together so a stock or oil issue flows straight into a job's final cost.
+engine** (`lib/inventory.js`) under all four domains: **Stores**, **Oil/Lubricant**, **Battery**, and
+**Workshop Job‑Card + Costing** — wired together so a stock or oil issue flows straight into a job's
+final cost.
 
-## What works (verified end‑to‑end — `npm run smoke`, 22/22)
+## What works (verified end‑to‑end — `npm run smoke`, 31/31)
 
 **One‑system integration (the point):** receive parts into stores → moving‑average cost rolls forward
 (10@1500 + 10@1700 → **1,600**) → issue to a workshop job → the issue **auto‑posts as a job part** →
@@ -24,6 +25,11 @@ by the live stock balance. All in one app.
 - **Consumption by asset** — litres + value of each lubricant issued per vehicle over a date range
   (spots abnormal consumption / leaks).
 - **Stock count** — physical vs book with variance and an optional auto‑adjust (`ADJ` movement).
+
+### Battery module (`routes/battery.js`)
+- **Serial‑true lifecycle** — each physical battery is one record; register → install → transfer →
+  return → scrap, each an append‑only `hist_battery_event`. **Original vs current vehicle** is always
+  preserved, and the full history is queryable per battery.
 
 ### Workshop module (`routes/jobcards.js`)
 - **Auth + RBAC** — session login; `requirePerm` gates every write (`viewer` cannot create a job → 403).
@@ -44,7 +50,10 @@ by the live stock balance. All in one app.
 | `auth/mw.js` | session table, `authMiddleware`, `requirePerm`, `scopeSql` (row‑level site filter) |
 | `lib/numbering.js` | `TYPE-SITE-YY-NNNNNN` via an atomic counter row |
 | `routes/auth.js` | login / logout |
+| `lib/inventory.js` | shared inventory engine — receive/issue/count over one MWAC ledger (stores + oil) |
 | `routes/stores.js` | the Stores module (receive/GRN · issue · MWAC ledger · issue→job link) |
+| `routes/oil.js` | the Oil/Lubricant module (receive · issue‑to‑vehicle · consumption · stock count) |
+| `routes/battery.js` | the Battery module (serial lifecycle · event history) |
 | `routes/jobcards.js` | the Workshop module (jobs · labour · parts · cost · close) |
 | `server.js` | wiring |
 | `seed.js` | minimal masters + `admin`/`foreman`/`viewer` users |
