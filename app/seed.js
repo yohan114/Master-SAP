@@ -88,10 +88,10 @@ const USERS = [
       ON CONFLICT (category_code) DO NOTHING RETURNING category_id`, [CB]))[0]
       || (await run("SELECT category_id FROM md_item_category WHERE category_code='SPARE'"))[0];
 
-    await run(`INSERT INTO md_item(item_no, item_name, item_type, category_id, base_uom_id, created_by)
-      VALUES('SP-0001','Brake Pad Set','SPARE',$1,$2,$3) ON CONFLICT (item_no) DO NOTHING`, [cat.category_id, uomId, CB]);
-    await run(`INSERT INTO md_item(item_no, item_name, item_type, base_uom_id, created_by)
-      VALUES('GN-0001','Shop Rag','GENERAL',$1,$2) ON CONFLICT (item_no) DO NOTHING`, [uomId, CB]);
+    await run(`INSERT INTO md_item(item_no, item_name, item_type, category_id, base_uom_id, reorder_level, reorder_qty, min_qty, created_by)
+      VALUES('SP-0001','Brake Pad Set','SPARE',$1,$2,15,20,8,$3) ON CONFLICT (item_no) DO NOTHING`, [cat.category_id, uomId, CB]);
+    await run(`INSERT INTO md_item(item_no, item_name, item_type, base_uom_id, reorder_level, reorder_qty, min_qty, created_by)
+      VALUES('GN-0001','Shop Rag','GENERAL',$1,25,30,20,$2) ON CONFLICT (item_no) DO NOTHING`, [uomId, CB]);
     const litre = (await run(`INSERT INTO md_uom(uom_code, uom_name, uom_type, created_by) VALUES('LTR','Litre','VOLUME',$1)
       ON CONFLICT (uom_code) DO NOTHING RETURNING uom_id`, [CB]))[0]
       || (await run("SELECT uom_id FROM md_uom WHERE uom_code='LTR'"))[0];

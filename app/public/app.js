@@ -76,6 +76,7 @@ async function dashboard() {
   ];
   const v = $('#view'); v.innerHTML = '';
   v.append(h(`<div class="kpis">${kpis.map((k) => `<div class="kpi"><div class="v">${k[1]}</div><div class="l">${k[0]}</div></div>`).join('')}</div>`));
+  await alertsPanel(v);
   v.append(card('Recent job cards', table([
     { h: 'Job No', k: 'jobcard_no' }, { h: 'Asset', r: (r) => esc(`${r.asset_no} · ${r.asset_name}`) },
     { h: 'Type', k: 'job_type' }, { h: 'Status', r: (r) => statusPill(r.jobcard_status) },
@@ -86,6 +87,20 @@ function statusPill(s) {
   const cls = s === 'CLOSED' ? 'p-live' : s === 'IN_SERVICE' ? 'p-live' : /HOLD|REJECT|CANCEL/.test(s) ? 'p-block'
     : /PENDING|DRAFT/.test(s) ? 'p-build' : 'p-ready';
   return `<span class="pill ${cls}">${esc(String(s).replace(/_/g, ' ').toLowerCase())}</span>`;
+}
+// Dashboard exception board — low stock / reorder, lubricant cover, warranty, overdue jobs, pending pricing.
+async function alertsPanel(v) {
+  let al; try { al = await api('/api/alerts'); } catch { return; }
+  const sev = { high: 'p-block', warn: 'p-build', info: 'p-idle' };
+  const active = (al.groups || []).filter((g) => g.count > 0);
+  const head = h(`<div class="row" style="align-items:center;gap:10px;margin:6px 0 12px"><h3 style="margin:0">Exceptions</h3>
+    <span class="pill ${al.total ? 'p-block' : 'p-live'}">${al.total ? al.total + ' to action' : 'all clear'}</span></div>`);
+  v.append(head);
+  if (!active.length) return;
+  active.forEach((g) => {
+    const cols = g.columns.map((c) => ({ h: c.h, k: c.k, n: c.n, r: c.n ? (row) => repNum(row[c.k]) : undefined }));
+    v.append(card(`${g.title}  ·  ${g.count}`, table(cols, g.rows), `<span class="pill ${sev[g.severity] || 'p-idle'}">${esc(g.severity)}</span>`));
+  });
 }
 
 /* ---------- stores ---------- */

@@ -34,7 +34,7 @@ router.get('/', async (req, res) => {
 router.post('/', requirePerm('JOB.WRITE'), async (req, res) => {
   try {
     const b = req.body || {};
-    const { asset_id, location_id, job_type = 'BREAKDOWN', reported_defect = null,
+    const { asset_id, location_id, job_type = 'BREAKDOWN', reported_defect = null, promised_date = null,
             estimated_cost = 0, jobcard_date = new Date().toISOString().slice(0, 10) } = b;
     if (!asset_id || !location_id) return res.status(400).json({ error: 'asset_id and location_id are required' });
     const uid = req.user.user_id;
@@ -44,10 +44,10 @@ router.post('/', requirePerm('JOB.WRITE'), async (req, res) => {
       const no = await nextNo('JOB', scode, jobcard_date, c);
       const r = await c.query(
         `INSERT INTO tx_jobcard(jobcard_no, jobcard_date, asset_id, location_id, job_type,
-             reported_defect, estimated_cost, jobcard_status, opened_at, site_id, created_by)
-         VALUES($1,$2,$3,$4,$5,$6,$7,'PENDING_TM_APPROVAL', now(), $8,$9)
+             reported_defect, promised_date, estimated_cost, jobcard_status, opened_at, site_id, created_by)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,'PENDING_TM_APPROVAL', now(), $9,$10)
          RETURNING jobcard_id, jobcard_no, jobcard_status`,
-        [no, jobcard_date, asset_id, location_id, job_type, reported_defect, money(estimated_cost), site_id, uid]);
+        [no, jobcard_date, asset_id, location_id, job_type, reported_defect, promised_date, money(estimated_cost), site_id, uid]);
       return r.rows[0];
     });
     res.json(out);

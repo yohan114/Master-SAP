@@ -243,6 +243,21 @@ const aud = await runRep('audit-trail');
 A('audit-trail shows who posted each movement', aud.rows.length > 0 && aud.rows.some((r) => r.posted_by), aud.rows?.[0]);
 A('unknown report -> 404', (await api('/api/reports/does-not-exist', admin.cookie)).status === 404);
 
+console.log('\nALERTS & REORDER ENGINE');
+// force exception conditions: an overdue job, an expired-warranty battery, and a near-empty lubricant
+await api('/api/jobcards', foreman.cookie, 'POST', { asset_id: ids.asset, location_id: ids.site, estimated_cost: 500, promised_date: '2020-01-01' });
+await api('/api/battery/register', keeper.cookie, 'POST', { serial_no: 'BAT-WAR-EXP', item_id: ids.batmodel, location_id: ids.site, warranty_end_date: '2020-06-01' });
+await api('/api/oil/issue', keeper.cookie, 'POST', { item_id: ids.lube, location_id: ids.site, qty: 150, asset_id: ids.asset });
+const al = (await api('/api/alerts', admin.cookie)).body;
+const grp = (k) => al.groups.find((g) => g.key === k) || { count: 0, rows: [] };
+A('below-minimum flags GN-0001 (10 ≤ min 20)', grp('below-minimum').rows.some((r) => r.item_no === 'GN-0001'), grp('below-minimum').rows);
+A('reorder flags SP-0001 (10 ≤ reorder 15, above min 8)', grp('reorder').rows.some((r) => r.item_no === 'SP-0001'), grp('reorder').rows);
+A('lubricant days-of-cover flags LB-0001 running low', grp('lubricant').rows.some((r) => r.item_no === 'LB-0001' && Number(r.days_left) < 14), grp('lubricant').rows);
+A('battery warranty flags the expired battery', grp('battery-warranty').rows.some((r) => r.battery_serial_no === 'BAT-WAR-EXP' && r.state === 'EXPIRED'), grp('battery-warranty').rows);
+A('overdue job card flagged (promised 2020-01-01)', grp('overdue-jobs').count >= 1, grp('overdue-jobs').rows);
+A('pending-pricing group present in the board', al.groups.some((g) => g.key === 'pending-pricing'));
+A('total exception count > 0', al.total > 0, al.total);
+
 await end();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

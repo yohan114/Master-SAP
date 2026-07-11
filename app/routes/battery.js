@@ -68,15 +68,16 @@ router.get('/:id', async (req, res) => {
 router.post('/register', requirePerm('BATTERY.WRITE'), async (req, res) => {
   try {
     const b = req.body || {};
-    const { serial_no, item_id, location_id, capacity_ah = null, voltage = null, acquisition_cost = 0 } = b;
+    const { serial_no, item_id, location_id, capacity_ah = null, voltage = null, acquisition_cost = 0,
+            warranty_start_date = null, warranty_end_date = null } = b;
     if (!serial_no || !item_id || !location_id) return res.status(400).json({ error: 'serial_no, item_id, location_id required' });
     const site_id = b.site_id || location_id;
     const out = await tx(async (c) => {
       const bat = (await c.query(
         `INSERT INTO md_battery(battery_serial_no, item_id, capacity_ah, voltage, acquisition_cost,
-             purchase_date, current_location_id, battery_status, site_id, created_by)
-         VALUES($1,$2,$3,$4,$5,$6,$7,'IN_STOCK',$8,$9) RETURNING *`,
-        [serial_no, item_id, capacity_ah, voltage, money(acquisition_cost), today(), location_id, site_id, req.user.user_id])).rows[0];
+             purchase_date, warranty_start_date, warranty_end_date, current_location_id, battery_status, site_id, created_by)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'IN_STOCK',$10,$11) RETURNING *`,
+        [serial_no, item_id, capacity_ah, voltage, money(acquisition_cost), today(), warranty_start_date, warranty_end_date, location_id, site_id, req.user.user_id])).rows[0];
       const ev = await moveBattery(c, bat, { event_type: 'RECEIVED', event_date: today(),
         to_location_id: location_id, to_status: 'IN_STOCK', event_value_amt: money(acquisition_cost) }, req.user.user_id);
       return { battery_id: bat.battery_id, serial_no, battery_status: 'IN_STOCK', ...ev };

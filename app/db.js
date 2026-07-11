@@ -12,8 +12,9 @@ const ENGINE = (process.env.DB_ENGINE || (process.env.SQLITE_DB ? 'sqlite' : 'po
 // PostgreSQL engine
 // ---------------------------------------------------------------------------
 function makePostgres() {
-  const { Pool } = require('pg');
-  const pool = new Pool({ max: 10, idleTimeoutMillis: 30000 });
+  const pg = require('pg');
+  pg.types.setTypeParser(1082, (v) => v);   // DATE -> raw 'YYYY-MM-DD' string (matches SQLite; no TZ shift)
+  const pool = new pg.Pool({ max: 10, idleTimeoutMillis: 30000 });
 
   // Parameterized query — never string-concatenate user input.
   async function q(text, params = []) {
