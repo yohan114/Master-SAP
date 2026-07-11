@@ -77,10 +77,46 @@ router.get('/:id', async (req, res) => {
        FROM tx_job_progress jp LEFT JOIN md_employee e ON e.employee_id=jp.logged_by_employee_id
        WHERE jp.jobcard_id=$1 AND jp.is_active ORDER BY jp.progress_id`, [id]);
     jc.outside = await q(`SELECT o.osr_id, o.osr_no, o.subcontractor_id, s.supplier_name, o.description,
-              o.estimated_cost, o.actual_cost, o.osr_status
+              o.invoice_no, o.estimated_cost, o.actual_cost, o.osr_status
        FROM tx_job_outside_repair o JOIN md_supplier s ON s.supplier_id=o.subcontractor_id
        WHERE o.jobcard_id=$1 AND o.is_active ORDER BY o.osr_id`, [id]);
     res.json(jc);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Read-only cost summary — live subtotals for the UI's Cost Summary panel. Computes labour + parts
+// (material + general) + outside repairs on the fly WITHOUT writing (unlike POST /:id/cost, which
+// persists cost_job_summary and flags the job PENDING_CLOSURE). is_provisional is the close gate:
+// TRUE while any non-returned part is still provisionally priced. Also surfaces the real close
+// pre-conditions (TM/OM approval, whether a final cost has been calculated) so the UI can explain a
+// disabled Close button rather than let it fail server-side.
+router.get('/:id/cost-summary', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const sc = scopeSql(req, 'jc', 2);
+    const jc = await one(
+      `SELECT jc.jobcard_id, jc.jobcard_status, jc.estimated_cost, jc.tm_approved_at, jc.om_approved_at
+       FROM tx_jobcard jc WHERE jc.jobcard_id=$1 AND jc.is_active${sc.sql}`, [id, ...sc.params]);
+    if (!jc) return res.status(404).json({ error: 'Job card not found' });
+    const p = await one(`SELECT
+        COALESCE(SUM(part_cost) FILTER (WHERE NOT is_general AND NOT is_returned),0) AS material,
+        COALESCE(SUM(part_cost) FILTER (WHERE is_general AND NOT is_returned),0) AS general,
+        BOOL_OR(is_provisional) FILTER (WHERE NOT is_returned) AS has_prov
+      FROM tx_job_parts WHERE jobcard_id=$1 AND is_active`, [id]);
+    const l = await one('SELECT COALESCE(SUM(labour_cost),0) AS labour FROM tx_job_labour WHERE jobcard_id=$1 AND is_active', [id]);
+    const o = await one('SELECT COALESCE(SUM(actual_cost),0) AS outside FROM tx_job_outside_repair WHERE jobcard_id=$1 AND is_active', [id]);
+    const summary = await one('SELECT cost_status FROM cost_job_summary WHERE jobcard_id=$1', [id]);
+    const material = money(p.material), general = money(p.general), labour = money(l.labour), outside = money(o.outside);
+    const parts = money(material + general);
+    const total = money(material + general + labour + outside);
+    const est = money(jc.estimated_cost);
+    res.json({
+      jobcard_id: id, jobcard_status: jc.jobcard_status,
+      labour_cost: labour, material_cost: material, general_cost: general, parts_cost: parts,
+      outside_repair_cost: outside, total_job_cost: total, estimated_cost: est, variance_amt: money(total - est),
+      is_provisional: !!p.has_prov, tm_approved: !!jc.tm_approved_at, om_approved: !!jc.om_approved_at,
+      cost_calculated: !!(summary && summary.cost_status === 'CALCULATED'),
+    });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -260,6 +296,28 @@ router.post('/:id/labour', requirePerm('JOB.LABOUR'), async (req, res) => {
       return r.rows[0];
     });
     res.json({ ...out, hourly_rate: Number(out.hourly_rate), labour_cost: Number(out.labour_cost) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Remove a labour line (soft delete), then re-run the cost roll-up. Blocked once the job is finalized
+// (this app has no "OPEN" status; CLOSED/CANCELLED are the terminal states).
+router.delete('/:id/labour/:labourId', requirePerm('JOB.LABOUR'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const labourId = Number(req.params.labourId);
+    const jc = await one('SELECT jobcard_id, jobcard_status FROM tx_jobcard WHERE jobcard_id=$1 AND is_active', [id]);
+    if (!jc) return res.status(404).json({ error: 'Job card not found' });
+    if (['CLOSED', 'CANCELLED'].includes(jc.jobcard_status))
+      return res.status(409).json({ error: `job is ${jc.jobcard_status}; labour lines can't be removed after it is finalized` });
+    const lab = await one('SELECT labour_id FROM tx_job_labour WHERE labour_id=$1 AND jobcard_id=$2 AND is_active', [labourId, id]);
+    if (!lab) return res.status(404).json({ error: 'Labour line not found' });
+    const uid = req.user.user_id;
+    const out = await tx(async (c) => {
+      await c.query('UPDATE tx_job_labour SET is_active=FALSE, updated_by=$1, updated_at=now() WHERE labour_id=$2', [uid, labourId]);
+      const cost = await rollupCost(c, id, uid);
+      return { ok: true, removed: labourId, total_job_cost: cost.total_job_cost };
+    });
+    res.json(out);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 

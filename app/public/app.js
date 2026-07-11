@@ -423,15 +423,39 @@ function registerBattery() {
 }
 
 /* ---------- workshop ---------- */
+const JC_STATUSES = ['PENDING_TM_APPROVAL', 'PENDING_OM_APPROVAL', 'APPROVED', 'IN_PROGRESS',
+  'WORK_COMPLETED', 'PENDING_CLOSURE', 'CLOSED', 'ON_HOLD', 'CANCELLED', 'REJECTED'];
 async function workshop() {
   const v = $('#view'); v.innerHTML = '';
   const jobs = (await api('/api/jobcards')).rows;
-  if (can('JOB.WRITE')) $('#topActions').append(btn('+ New job card', newJob));
-  v.append(card(`Job cards (${jobs.length})`, table([
-    { h: 'Job No', k: 'jobcard_no' }, { h: 'Asset', r: (r) => esc(`${r.asset_no} · ${r.asset_name}`) },
-    { h: 'Type', k: 'job_type' }, { h: 'Status', r: (r) => statusPill(r.jobcard_status) },
-    { h: 'Est.', n: true, r: (r) => money(r.estimated_cost) }, { h: 'Actual', n: true, r: (r) => money(r.total_job_cost) },
-  ], jobs, { click: (r) => openJob(r.jobcard_id) })));
+  if (can('JOB.WRITE')) $('#topActions').append(btn('+ New Job Card', newJob));
+  // filter bar — status dropdown + created date range
+  const filters = h(`<div class="card"><div class="card-b"><div class="row" style="align-items:flex-end">
+      <div class="f" style="flex:0 0 210px"><label style="margin:0 0 5px">Status</label>
+        <select id="jcStatus"><option value="">All statuses</option>${JC_STATUSES.map((st) => `<option value="${st}">${esc(st.replace(/_/g, ' ').toLowerCase())}</option>`).join('')}</select></div>
+      <div><label style="margin:0 0 5px">Created from</label><input type="date" id="jcFrom" style="width:150px"></div>
+      <div><label style="margin:0 0 5px">Created to</label><input type="date" id="jcTo" style="width:150px"></div>
+      <button class="btn sm" id="jcClear">Clear</button></div></div></div>`);
+  v.append(filters);
+  const host = h('<div></div>'); v.append(host);
+  const cols = [
+    { h: 'JC Number', k: 'jobcard_no' },
+    { h: 'Asset', r: (r) => esc(`${r.asset_no} · ${r.asset_name}`) },
+    { h: 'Status', r: (r) => statusPill(r.jobcard_status) },
+    { h: 'Total Cost', n: true, r: (r) => money(r.total_job_cost) },
+    { h: 'Created Date', k: 'jobcard_date' },
+  ];
+  const render = () => {
+    const st = $('#jcStatus').value, from = $('#jcFrom').value, to = $('#jcTo').value;
+    const rows = jobs.filter((j) => (!st || j.jobcard_status === st)
+      && (!from || String(j.jobcard_date) >= from) && (!to || String(j.jobcard_date) <= to));
+    host.innerHTML = '';
+    host.append(card(`Job cards (${rows.length}${rows.length !== jobs.length ? ' of ' + jobs.length : ''})`,
+      table(cols, rows, { click: (r) => openJob(r.jobcard_id) })));
+  };
+  filters.addEventListener('change', render);
+  filters.querySelector('#jcClear').onclick = () => { $('#jcStatus').value = ''; $('#jcFrom').value = ''; $('#jcTo').value = ''; render(); };
+  render();
 }
 function newJob() {
   formModal('New job card', [
@@ -444,39 +468,124 @@ async function doJob(id, action, body = {}) {
   try { const r = await api(`/api/jobcards/${id}/${action}`, { method: 'POST', body: JSON.stringify(body) }); toast(`Job ${action.replace(/-/g, ' ')} ✓`); openJob(id); return r; }
   catch (e) { toast(e.message, true); }
 }
-async function openJob(id) {
+async function openJob(id, activeTab) {
   const j = await api('/api/jobcards/' + id);
-  const c = j.cost || {};
   const s = j.jobcard_status;
-  const kpis = [['Material', c.material_cost], ['Labour', c.labour_cost], ['General', c.general_cost], ['Outside', c.outside_repair_cost], ['Total', c.total_job_cost || j.total_job_cost]];
+  const finalized = ['CLOSED', 'CANCELLED'].includes(s);
   const v = $('#view'); v.innerHTML = ''; v.append(backBtn('workshop'));
-  const head = h(`<div class="kpis">${kpis.map((k) => `<div class="kpi"><div class="v"><small>LKR</small> ${money(k[1])}</div><div class="l">${k[0]}</div></div>`).join('')}</div>`);
-  v.append(head);
-  const bar = h('<div class="row" style="margin-bottom:18px;flex-wrap:wrap"></div>');
-  // lifecycle (status-aware): TM approve -> OM approve -> start -> progress/complete
-  if (can('JOB.APPROVE_TM') && s === 'PENDING_TM_APPROVAL') bar.append(btnP('TM approve', () => doJob(id, 'approve-tm')));
-  if (can('JOB.APPROVE_OM') && s === 'PENDING_OM_APPROVAL') bar.append(btnP('OM approve', () => doJob(id, 'approve-om')));
-  if (can('JOB.WRITE') && ['APPROVED', 'ASSIGNED_WORKSHOP', 'ON_HOLD'].includes(s)) bar.append(btnP('Start work', () => doJob(id, 'start')));
-  if (can('JOB.WRITE') && ['IN_PROGRESS', 'AWAITING_PARTS', 'AWAITING_OUTSIDE_REPAIR'].includes(s)) {
-    bar.append(btn('Log progress', () => progressForm(id))); bar.append(btn('Complete work', () => doJob(id, 'complete')));
-  }
-  if (can('JOB.LABOUR')) bar.append(btn('+ Labour', () => labourForm(id)));
-  if (can('JOB.PARTS')) bar.append(btn('+ Part (issue)', () => issueForm([], 'stores', id)));
-  if (can('JOB.OUTSIDE')) bar.append(btn('+ Outside repair', () => outsideForm(id)));
-  if (can('JOB.COST')) bar.append(btn('Compute cost', () => doJob(id, 'cost')));
-  if (can('JOB.CLOSE')) bar.append(btnP('Close job', () => doJob(id, 'close')));
+
+  // two-column: main (header + tabbed labour/parts/outside) | cost-summary sidebar
+  const layout = h(`<div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">
+    <div class="jc-main" style="flex:1;min-width:360px"></div>
+    <div class="jc-side" style="flex:0 0 300px;min-width:260px"></div></div>`);
+  const main = layout.querySelector('.jc-main'); const side = layout.querySelector('.jc-side');
+  v.append(layout);
+
+  // --- header: status/asset/meta + lifecycle actions ---
   const info = h(`<div class="row" style="margin-bottom:12px">
     <div><div class="crumb">Status</div>${statusPill(s)}</div>
     <div><div class="crumb">Asset</div><b>${esc(j.asset_no)} · ${esc(j.asset_name)}</b></div>
     <div><div class="crumb">Type</div><b>${esc(j.job_type)}</b></div>
-    ${j.promised_date ? `<div><div class="crumb">Promised</div><b>${esc(j.promised_date)}</b></div>` : ''}</div>`);
-  const wrap = document.createElement('div'); wrap.append(info, bar);
-  v.append(card(esc(j.jobcard_no), wrap));
-  v.append(card('Labour', table([{ h: 'No', k: 'labour_no' }, { h: 'Technician', k: 'employee_name' }, { h: 'Hrs', n: true, k: 'hours' }, { h: 'OT', n: true, k: 'ot_hours' }, { h: 'Rate', n: true, r: (r) => money(r.hourly_rate) }, { h: 'Cost', n: true, r: (r) => money(r.labour_cost) }], j.labour)));
-  v.append(card('Parts', table([{ h: 'Item', k: 'item_name' }, { h: 'Qty', n: true, k: 'qty' }, { h: 'Unit', n: true, r: (r) => money(r.unit_cost) }, { h: 'Cost', n: true, r: (r) => money(r.part_cost) }, { h: '', r: (r) => r.is_general ? '<span class="pill p-idle">general</span>' : r.is_provisional ? '<span class="pill p-build">provisional</span>' : '' }], j.parts)));
-  if ((j.outside || []).length || can('JOB.OUTSIDE'))
-    v.append(card('Outside / subcontract repair', table([{ h: 'OSR No', k: 'osr_no' }, { h: 'Subcontractor', k: 'supplier_name' }, { h: 'Description', k: 'description' }, { h: 'Actual', n: true, r: (r) => money(r.actual_cost) }, { h: 'Status', r: (r) => statusPill(r.osr_status) }], j.outside || [])));
-  v.append(card('Progress log', table([{ h: 'Date', k: 'progress_date' }, { h: 'Work done', k: 'work_done' }, { h: '%', n: true, r: (r) => int(r.pct_complete) }, { h: 'Hrs', n: true, r: (r) => int(r.hours_spent) }, { h: 'By', r: (r) => esc(r.logged_by || '—') }], j.progress || [])));
+    <div><div class="crumb">Created</div><b>${esc(j.jobcard_date)}</b></div>
+    ${j.promised_date ? `<div><div class="crumb">Promised</div><b>${esc(j.promised_date)}</b></div>` : ''}
+    ${j.reported_defect ? `<div style="flex-basis:100%"><div class="crumb">Reported defect</div><b>${esc(j.reported_defect)}</b></div>` : ''}</div>`);
+  const bar = h('<div class="row" style="flex-wrap:wrap"></div>');
+  if (can('JOB.APPROVE_TM') && s === 'PENDING_TM_APPROVAL') bar.append(btnP('TM approve', () => doJob(id, 'approve-tm')));
+  if (can('JOB.APPROVE_OM') && s === 'PENDING_OM_APPROVAL') bar.append(btnP('OM approve', () => doJob(id, 'approve-om')));
+  if (can('JOB.APPROVE_TM') && ['PENDING_TM_APPROVAL', 'PENDING_OM_APPROVAL'].includes(s)) bar.append(btn('Reject', () => doJob(id, 'reject')));
+  if (can('JOB.WRITE') && ['APPROVED', 'ASSIGNED_WORKSHOP', 'ON_HOLD'].includes(s)) bar.append(btnP('Start work', () => doJob(id, 'start')));
+  if (can('JOB.WRITE') && ['IN_PROGRESS', 'AWAITING_PARTS', 'AWAITING_OUTSIDE_REPAIR'].includes(s)) {
+    bar.append(btn('Log progress', () => progressForm(id))); bar.append(btn('Complete work', () => doJob(id, 'complete')));
+  }
+  if (can('JOB.COST') && !finalized) bar.append(btn('Compute cost', () => doJob(id, 'cost')));
+  const hwrap = document.createElement('div'); hwrap.append(info, bar);
+  main.append(card(esc(j.jobcard_no), hwrap));
+
+  // --- tabs: Labour / Parts / Outside Repairs ---
+  const TABS = [['labour', 'Labour'], ['parts', 'Parts'], ['outside', 'Outside Repairs']];
+  let tab = activeTab || 'labour';
+  const tabBar = h(`<div class="tabs">${TABS.map(([k, l]) => `<button class="tab" data-tab="${k}">${l}</button>`).join('')}</div>`);
+  const panel = h('<div class="jc-panel"></div>');
+  const tabsCard = h('<div class="card"><div class="card-b"></div></div>');
+  tabsCard.querySelector('.card-b').append(tabBar, panel); main.append(tabsCard);
+
+  const renderTab = () => {
+    tabBar.querySelectorAll('.tab').forEach((t) => t.classList.toggle('active', t.dataset.tab === tab));
+    panel.innerHTML = '';
+    const add = h('<div class="row" style="margin-bottom:12px"></div>');
+    if (tab === 'labour') {
+      if (can('JOB.LABOUR') && !finalized) add.append(btn('+ Add labour', () => labourForm(id)));
+      panel.append(add, table([
+        { h: 'No', k: 'labour_no' }, { h: 'Technician', k: 'employee_name' },
+        { h: 'Hrs', n: true, k: 'hours' }, { h: 'OT', n: true, k: 'ot_hours' },
+        { h: 'Rate', n: true, r: (r) => money(r.hourly_rate) }, { h: 'Cost', n: true, r: (r) => money(r.labour_cost) },
+        { h: '', n: true, r: (r) => (can('JOB.LABOUR') && !finalized) ? `<button class="btn sm" data-del-lab="${r.labour_id}">Remove</button>` : '' },
+      ], j.labour));
+    } else if (tab === 'parts') {
+      if (can('JOB.PARTS') && !finalized) add.append(btn('+ Issue part', () => issueForm([], 'stores', id)));
+      panel.append(add, table([
+        { h: 'Item', r: (r) => esc(`${r.item_no} · ${r.item_name}`) }, { h: 'Qty', n: true, k: 'qty' },
+        { h: 'Unit', n: true, r: (r) => money(r.unit_cost) }, { h: 'Cost', n: true, r: (r) => money(r.part_cost) },
+        { h: '', r: (r) => r.is_general ? '<span class="pill p-idle">general</span>' : r.is_provisional ? '<span class="pill p-build">provisional</span>' : '' },
+      ], j.parts));
+    } else {
+      if (can('JOB.OUTSIDE') && !finalized) add.append(btn('+ Add outside repair', () => outsideForm(id)));
+      panel.append(add, table([
+        { h: 'OSR No', k: 'osr_no' }, { h: 'Vendor', k: 'supplier_name' }, { h: 'Description', r: (r) => esc(r.description || '—') },
+        { h: 'Invoice', r: (r) => esc(r.invoice_no || '—') }, { h: 'Amount', n: true, r: (r) => money(r.actual_cost) },
+        { h: 'Status', r: (r) => statusPill(r.osr_status) },
+        { h: '', n: true, r: (r) => (can('JOB.OUTSIDE') && !finalized) ? `<button class="btn sm" data-del-osr="${r.osr_id}">Remove</button>` : '' },
+      ], j.outside || []));
+    }
+  };
+  tabBar.addEventListener('click', (e) => { const t = e.target.closest('.tab'); if (t) { tab = t.dataset.tab; renderTab(); } });
+  panel.addEventListener('click', async (e) => {
+    const dl = e.target.closest('[data-del-lab]'); const dor = e.target.closest('[data-del-osr]');
+    if (dl) { try { await api(`/api/jobcards/${id}/labour/${dl.dataset.delLab}`, { method: 'DELETE' }); toast('Labour removed'); openJob(id, 'labour'); } catch (err) { toast(err.message, true); } }
+    if (dor) { try { await api(`/api/jobcards/${id}/outside-repairs/${dor.dataset.delOsr}`, { method: 'DELETE' }); toast('Outside repair removed'); openJob(id, 'outside'); } catch (err) { toast(err.message, true); } }
+  });
+  renderTab();
+
+  // progress log stays below the tabs
+  main.append(card('Progress log', table([{ h: 'Date', k: 'progress_date' }, { h: 'Work done', k: 'work_done' },
+    { h: '%', n: true, r: (r) => int(r.pct_complete) }, { h: 'Hrs', n: true, r: (r) => int(r.hours_spent) },
+    { h: 'By', r: (r) => esc(r.logged_by || '—') }], j.progress || [])));
+
+  // --- cost summary sidebar (live compute from /cost-summary) ---
+  side.append(await jobCostSidebar(id, s));
+}
+
+// Right-sidebar Cost Summary panel: labour / parts / outside subtotals + grand total, and an
+// Approve/Close button that stays disabled while any cost is provisional (or approvals/cost are
+// outstanding — the real close pre-conditions), with a one-line reason.
+async function jobCostSidebar(id, status) {
+  let cs; try { cs = await api(`/api/jobcards/${id}/cost-summary`); } catch { return card('Cost Summary', h('<p class="muted">No cost data.</p>')); }
+  const line = (l, val, strong) => `<div class="row" style="justify-content:space-between;align-items:baseline;padding:7px 0;${strong ? 'border-top:1px solid var(--line-2);margin-top:4px' : ''}">
+    <span class="${strong ? '' : 'muted'}" style="${strong ? 'font-weight:700' : ''}">${esc(l)}</span>
+    <span class="num" style="${strong ? 'font-size:16px;font-weight:700' : ''}"><small style="color:var(--ink-3)">LKR</small> ${money(val)}</span></div>`;
+  const body = h(`<div>
+    ${line('Labour', cs.labour_cost)}
+    ${line('Parts', cs.parts_cost)}
+    ${line('Outside repair', cs.outside_repair_cost)}
+    ${line('Grand total', cs.total_job_cost, true)}
+    <div class="muted" style="font-size:11px;margin-top:8px">Estimated LKR ${money(cs.estimated_cost)} · variance ${money(cs.variance_amt)}</div>
+    ${cs.is_provisional ? '<div style="margin-top:12px"><span class="pill p-build">provisional prices pending</span></div>' : ''}
+    <div class="jc-close" style="margin-top:14px"></div></div>`);
+  const closeHost = body.querySelector('.jc-close');
+  if (can('JOB.CLOSE')) {
+    const blocked = cs.is_provisional || !cs.tm_approved || !cs.om_approved || !cs.cost_calculated || ['CLOSED', 'CANCELLED'].includes(cs.jobcard_status);
+    const cb = btnP('Approve / Close job', () => doJob(id, 'close')); cb.classList.add('btn-full'); cb.style.marginTop = '0';
+    if (blocked) { cb.disabled = true; cb.style.opacity = '.5'; cb.style.cursor = 'not-allowed'; }
+    closeHost.append(cb);
+    let why = '';
+    if (cs.jobcard_status === 'CLOSED') why = 'Job is closed.';
+    else if (cs.jobcard_status === 'CANCELLED') why = 'Job is cancelled.';
+    else if (!cs.tm_approved || !cs.om_approved) why = 'Awaiting TM / OM approval.';
+    else if (cs.is_provisional) why = 'Confirm provisional part prices to enable close.';
+    else if (!cs.cost_calculated) why = 'Run “Compute cost” to enable close.';
+    if (why) closeHost.append(h(`<div class="muted" style="font-size:11px;margin-top:6px">${esc(why)}</div>`));
+  }
+  return card('Cost Summary', body);
 }
 function progressForm(id) {
   formModal('Log daily progress', [
@@ -486,16 +595,17 @@ function progressForm(id) {
 }
 function outsideForm(id) {
   formModal('Outside / subcontract repair', [
-    { k: 'subcontractor_id', l: 'Subcontractor', sel: opt(M.suppliers || [], 'supplier_id', 'supplier_name') },
-    { k: 'description', l: 'Description' }, { k: 'actual_cost', l: 'Actual cost (LKR)', type: 'number' },
+    { k: 'subcontractor_id', l: 'Vendor (subcontractor)', sel: opt(M.suppliers || [], 'supplier_id', 'supplier_name') },
+    { k: 'description', l: 'Description' }, { k: 'actual_cost', l: 'Amount (LKR)', type: 'number' },
+    { k: 'invoice_no', l: 'Invoice ref (optional)' },
     { k: 'osr_status', l: 'Status', sel: ['SENT', 'IN_PROGRESS', 'RECEIVED', 'INVOICED', 'CLOSED'].map((x) => `<option>${x}</option>`).join('') },
-  ], async (d) => { await api(`/api/jobcards/${id}/outside-repairs`, { method: 'POST', body: JSON.stringify(d) }); toast('Outside repair added'); openJob(id); });
+  ], async (d) => { await api(`/api/jobcards/${id}/outside-repairs`, { method: 'POST', body: JSON.stringify(d) }); toast('Outside repair added'); openJob(id, 'outside'); });
 }
 function labourForm(id) {
   formModal('Add labour', [
     { k: 'employee_id', l: 'Technician', sel: opt(M.employees, 'employee_id', 'employee_name') },
     { k: 'hours', l: 'Hours', type: 'number' }, { k: 'ot_hours', l: 'OT hours', type: 'number' },
-  ], async (d) => { await api(`/api/jobcards/${id}/labour`, { method: 'POST', body: JSON.stringify(d) }); toast('Labour added'); openJob(id); });
+  ], async (d) => { await api(`/api/jobcards/${id}/labour`, { method: 'POST', body: JSON.stringify(d) }); toast('Labour added'); openJob(id, 'labour'); });
 }
 
 /* ---------- reports & exports ---------- */
@@ -556,7 +666,7 @@ async function issueForm(items, mod, jobId) {
   formModal(jobId ? 'Issue part to job' : `Issue ${mod === 'oil' ? 'lubricant' : 'stock'}`, fields, async (d) => {
     if (jobId) d.jobcard_id = jobId;
     await api(`/api/${mod}/issue`, { method: 'POST', body: JSON.stringify(d) });
-    toast('Issued'); jobId ? openJob(jobId) : route(mod);
+    toast('Issued'); jobId ? openJob(jobId, 'parts') : route(mod);
   });
 }
 function pickAsset(title, cb) { formModal(title, [{ k: 'asset_id', l: 'Asset', sel: opt(M.assets, 'asset_id', 'asset_no') }], (d) => cb(d.asset_id)); }

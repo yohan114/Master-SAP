@@ -61,6 +61,12 @@ A('roll-up: material 3000 / labour 5500 / general 250 / total 8750',
   cost.body.material_cost === 3000 && cost.body.labour_cost === 5500 && cost.body.general_cost === 250 && cost.body.total_job_cost === 8750, cost.body);
 A('variance vs 10000 estimate = -1250 (-12.5%)', cost.body.variance_amt === -1250 && cost.body.variance_pct === -12.5, cost.body);
 
+const csum = await api(`/api/jobcards/${jid}/cost-summary`, admin.cookie);
+A('cost-summary (read-only) mirrors the roll-up: labour 5500 / parts 3250 / outside 0 / total 8750',
+  csum.body.labour_cost === 5500 && csum.body.parts_cost === 3250 && csum.body.outside_repair_cost === 0 && csum.body.total_job_cost === 8750, csum.body);
+A('cost-summary exposes the close-gate flags (approved · not provisional · cost calculated)',
+  csum.body.tm_approved === true && csum.body.om_approved === true && csum.body.is_provisional === false && csum.body.cost_calculated === true, csum.body);
+
 const close = await api(`/api/jobcards/${jid}/close`, foreman.cookie, 'POST');
 A('close (approved, no provisional) -> 200 CLOSED', close.status === 200 && close.body.jobcard_status === 'CLOSED', close.body);
 
@@ -97,6 +103,20 @@ A('cost roll-up folds in the outside repair: outside 15000 + labour 2000 = 17000
 const gotL = await api(`/api/jobcards/${jL}`, admin.cookie);
 A('job detail carries 1 progress entry + 1 outside repair', gotL.body.progress.length === 1 && gotL.body.outside.length === 1, { p: gotL.body.progress?.length, o: gotL.body.outside?.length });
 A('close (approved + costed) -> CLOSED', (await api(`/api/jobcards/${jL}/close`, foreman.cookie, 'POST')).body.jobcard_status === 'CLOSED');
+
+console.log('\nLABOUR REMOVE (soft-delete + roll-up refresh)');
+const jobD = await api('/api/jobcards', foreman.cookie, 'POST', { asset_id: ids.asset, location_id: ids.site, estimated_cost: 4000 });
+const jD = jobD.body.jobcard_id;
+await api(`/api/jobcards/${jD}/approve-tm`, admin.cookie, 'POST', {});
+await api(`/api/jobcards/${jD}/approve-om`, admin.cookie, 'POST', {});
+await api(`/api/jobcards/${jD}/labour`, foreman.cookie, 'POST', { employee_id: ids.tech, hours: 3 });        // 3*500 = 1500
+const labB = await api(`/api/jobcards/${jD}/labour`, foreman.cookie, 'POST', { employee_id: ids.tech, hours: 5 });  // 5*500 = 2500
+const csD = await api(`/api/jobcards/${jD}/cost-summary`, admin.cookie);
+A('cost-summary sums both labour lines (1500 + 2500 = 4000)', csD.body.labour_cost === 4000, csD.body);
+const delLab = await api(`/api/jobcards/${jD}/labour/${labB.body.labour_id}`, foreman.cookie, 'DELETE');
+A('DELETE labour removes the line + re-runs the roll-up (labour back to 1500)',
+  delLab.body.total_job_cost === 1500 && (await api(`/api/jobcards/${jD}`, admin.cookie)).body.labour.length === 1, delLab.body);
+A('DELETE an already-removed labour line -> 404', (await api(`/api/jobcards/${jD}/labour/${labB.body.labour_id}`, foreman.cookie, 'DELETE')).status === 404);
 
 console.log('\nONE SYSTEM: stores issue flows into a job cost (MWAC ledger)');
 const keeper = await login('keeper', 'ChangeMe@Keep1');
