@@ -22,6 +22,8 @@ const path = require('path');
 const src = fs.readFileSync(path.join(__dirname, 'schema.sql'), 'utf8');
 
 let out = src
+  // drop Postgres-only CREATE EXTENSION lines (SQLite has no extensions; admin dedup falls back to JS)
+  .replace(/CREATE EXTENSION[^;]*;\s*/gi, '')
   // drop the deferred cross-reference FKs (Section 13); each is one `ALTER TABLE … ;`
   .replace(/ALTER TABLE[\s\S]*?;\s*/g, '')
   // identity PKs -> SQLite autoincrement rowid alias (must run before the generic BIGINT swap)

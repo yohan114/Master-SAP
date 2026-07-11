@@ -30,6 +30,7 @@ async function boot() {
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
   $('#who').textContent = ME.user.full_name || ME.user.username;
   $('#whoRole').textContent = ME.perms.includes('ADMIN.ALL') ? 'Administrator' : `${ME.perms.length} permissions`;
+  $('#navAdmin').classList.toggle('hidden', !can('ADMIN.ALL'));   // Admin tools: system_admin only
   route('dashboard');
 }
 function showLogin() { $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); }
@@ -41,9 +42,9 @@ $('#loginForm').addEventListener('submit', async (e) => {
 $('#logout').addEventListener('click', async () => { await api('/auth/logout', { method: 'POST' }); location.reload(); });
 $('#nav').addEventListener('click', (e) => { const a = e.target.closest('a[data-view]'); if (a) route(a.dataset.view); });
 
-const VIEWS = { dashboard, stores, mrn, purchase, oil, battery, workshop, reports };
-const CRUMB = { dashboard: 'Overview', stores: 'Inventory', mrn: 'Requisitions', purchase: 'Procurement', oil: 'Lubricant book', battery: 'Serial lifecycle', workshop: 'Job costing', reports: 'Reports & exports' };
-const TITLE = { dashboard: 'Dashboard', stores: 'Stores', mrn: 'Requisitions (MRN)', purchase: 'Purchasing', oil: 'Oil & Lubricant', battery: 'Battery', workshop: 'Workshop', reports: 'Reports' };
+const VIEWS = { dashboard, stores, mrn, purchase, oil, battery, workshop, reports, admin };
+const CRUMB = { dashboard: 'Overview', stores: 'Inventory', mrn: 'Requisitions', purchase: 'Procurement', oil: 'Lubricant book', battery: 'Serial lifecycle', workshop: 'Job costing', reports: 'Reports & exports', admin: 'Master data' };
+const TITLE = { dashboard: 'Dashboard', stores: 'Stores', mrn: 'Requisitions (MRN)', purchase: 'Purchasing', oil: 'Oil & Lubricant', battery: 'Battery', workshop: 'Workshop', reports: 'Reports', admin: 'Admin — deduplication' };
 async function route(v) {
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === v));
   $('#crumb').textContent = CRUMB[v]; $('#title').textContent = TITLE[v]; $('#topActions').innerHTML = '';
@@ -695,6 +696,35 @@ function downloadCsv(rep) {
   const cell = (s) => { s = String(s ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
   const csv = [rep.columns.map((c) => cell(c.h)).join(','), ...rep.rows.map((r) => rep.columns.map((c) => cell(r[c.k])).join(','))].join('\n');
   const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `${rep.key}.csv`; a.click(); URL.revokeObjectURL(a.href);
+}
+
+/* ---------- admin — item deduplication (system_admin only) ---------- */
+async function admin() {
+  const v = $('#view'); v.innerHTML = '';
+  const data = await api('/api/admin/duplicate-candidates');
+  const pairs = data.pairs || [];
+  v.append(h(`<p class="muted" style="margin:0 0 14px">Near-duplicate <b>md_item</b> rows — name similarity &gt; ${Math.round((data.threshold || 0.8) * 100)}%.
+    Merging reassigns every reference (ledger, GRN/MRN/PO lines, job parts, balances…) to the item you keep, folds stock, and retires the other.
+    <span class="muted">Matching engine: ${esc(data.engine === 'sqlite' ? 'JS trigram (SQLite)' : 'pg_trgm (PostgreSQL)')}.</span></p>`));
+  const itemCell = (it) => `<div><b>${esc(it.item_no)}</b> · ${esc(it.item_name)}<div class="muted" style="font-size:11px">${esc(it.category || '—')} · on hand ${int(it.stock_qty)}</div></div>`;
+  const tbl = table([
+    { h: 'Keep (survivor)', r: (p) => itemCell(p.keep) },
+    { h: 'Merge → into keep', r: (p) => itemCell(p.merge) },
+    { h: 'Similarity', n: true, r: (p) => `${Math.round(p.similarity * 100)}%` },
+    { h: '', r: () => '<button class="btn sm primary" data-merge>Merge</button>' },
+  ], pairs);
+  tbl.querySelectorAll('tbody tr').forEach((tr, i) => { const b = tr.querySelector('[data-merge]'); if (b) b.onclick = () => mergeItems(pairs[i], tr); });
+  v.append(card(`Duplicate candidates (${pairs.length})`, tbl));
+}
+function mergeItems(p, tr) {
+  formModal(`Merge — keep ${p.keep.item_no}`, [
+    { k: 'keep', l: 'Keep (survivor)', ro: `${p.keep.item_no} · ${p.keep.item_name}  ·  on hand ${int(p.keep.stock_qty)}` },
+    { k: 'merge', l: 'Merge & retire', ro: `${p.merge.item_no} · ${p.merge.item_name}  ·  on hand ${int(p.merge.stock_qty)}` },
+  ], async () => {
+    const r = await api('/api/admin/merge-items', { method: 'POST', body: JSON.stringify({ keepId: p.keep.item_id, mergeId: p.merge.item_id }) });
+    toast(`Merged ${p.merge.item_no} → ${p.keep.item_no} · ${r.ledger_reassigned} ledger row(s) moved`);
+    if (tr) { tr.style.opacity = '.55'; const cell = tr.querySelector('td:last-child'); if (cell) cell.innerHTML = '<span class="pill p-live">merged</span>'; }
+  });
 }
 
 /* ---------- shared forms ---------- */

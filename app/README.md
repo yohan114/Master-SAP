@@ -10,10 +10,10 @@ wired together so a stock or oil issue flows straight into a job's final cost.
 - **SQLite** (`DB_ENGINE=sqlite`) — a single local file, zero DB server to run. Schema:
   `sql/schema.sqlite.sql` (generated from the Postgres schema — `node sql/gen-sqlite-schema.js`).
   Great for a laptop trial, a single‑PC install, or matching the legacy SQLite books. The whole
-  suite passes **115/115 on both engines** with the same code (`db.js` translates the handful of
+  suite passes **123/123 on both engines** with the same code (`db.js` translates the handful of
   Postgres‑isms and picks the engine from `DB_ENGINE` / `SQLITE_DB`).
 
-## What works (verified end‑to‑end — `npm run smoke`, 115/115)
+## What works (verified end‑to‑end — `npm run smoke`, 123/123)
 
 **One‑system integration (the point):** receive parts into stores → moving‑average cost rolls forward
 (10@1500 + 10@1700 → **1,600**) → issue to a workshop job → the issue **auto‑posts as a job part** →
@@ -106,6 +106,21 @@ by the live stock balance. All in one app.
   a suggested qty (`reorder_qty − on‑hand`), both editable. Confirm posts `POST /api/purchase/po` (→ a
   **DRAFT** `tx_po`) and the row flips in place to “PO raised · PO‑…”, so reordering never leaves the board.
 
+### Admin — item deduplication (`routes/admin.js`, **system_admin** only)
+- **`GET /api/admin/duplicate-candidates`** — near‑duplicate `md_item` rows (name similarity > 80%) with
+  both codes, names, categories and on‑hand stock. Uses **PostgreSQL `pg_trgm` `similarity()`** on
+  Postgres; on SQLite (no extensions) an equivalent **trigram‑Jaccard similarity is computed in JS**, so
+  the tool works on either engine. (`CREATE EXTENSION pg_trgm` is in `sql/schema.sql`, stripped from the
+  generated SQLite schema.)
+- **`POST /api/admin/merge-items` `{ keepId, mergeId }`** — in one transaction, reassigns **every**
+  `item_id` reference (ledger, GRN/MRN/PO/issue/transfer/return lines, job parts, pending‑price, battery…
+  — not just the obvious few), **folds** stock balances (respecting `UNIQUE(item_id, location_id)` —
+  quantities combine and the moving‑average re‑weights), then **soft‑deletes** the merged item. Any
+  failure rolls the whole merge back.
+- Both routes require **`ADMIN.ALL`** (the permission held only by the `system_admin` role — this app's
+  RBAC is permission‑based). The web UI adds an **Admin** page (visible to admins only) listing the
+  candidates with a **Merge** button per row.
+
 ## Files
 | Path | Purpose |
 |---|---|
@@ -161,7 +176,7 @@ export DB_ENGINE=sqlite SQLITE_DB=./umms.sqlite   # one local file
 node init-db.js       # loads sql/schema.sqlite.sql into a fresh file
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 115/115  (start the server first, in another shell)
+npm run smoke         # 123/123  (start the server first, in another shell)
 ```
 
 ### Option B — PostgreSQL
@@ -173,7 +188,7 @@ cd app && npm install
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=umms   # PG* env, no secrets in code
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 115/115
+npm run smoke         # 123/123
 ```
 
 The same `migrate-legacy.js` / `backfill-opening.js` work under either engine (prefix `DB_ENGINE=sqlite`

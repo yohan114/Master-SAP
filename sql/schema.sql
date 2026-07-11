@@ -9,6 +9,11 @@
 -- Forward cross-references are added in the DEFERRED CONSTRAINTS section (bottom).
 -- =====================================================================
 
+-- Fuzzy text matching for the admin duplicate-item finder (similarity()). Standard contrib module.
+-- (Stripped from the generated SQLite schema — SQLite has no extensions; the app falls back to an
+--  in-JS trigram similarity there. See routes/admin.js.)
+CREATE EXTENSION IF NOT EXISTS pg_trgm;
+
 -- =====================================================================
 -- SECTION 0 — SECURITY CORE (declared first: audit FKs point at sec_user)
 -- =====================================================================

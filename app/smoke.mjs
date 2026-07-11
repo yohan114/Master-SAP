@@ -354,6 +354,31 @@ A('reorderAlerts flags low items (≥1)', kp.reorderAlerts >= 1, kp.reorderAlert
 A('batteriesWarrantyDue flags the expired battery (≥1)', kp.batteriesWarrantyDue >= 1, kp.batteriesWarrantyDue);
 A('stockTrend is a dense 7-day {date,net} series', Array.isArray(kp.stockTrend) && kp.stockTrend.length === 7 && 'date' in kp.stockTrend[0] && 'net' in kp.stockTrend[0], kp.stockTrend?.length);
 
+console.log('\nADMIN — ITEM DEDUPLICATION (duplicate-candidates + merge-items)');
+const admUid = (await q("SELECT user_id FROM sec_user WHERE username='admin'"))[0].user_id;
+// seed a same-named duplicate of SP-0001 'Brake Pad Set'
+await q(`INSERT INTO md_item(item_no, item_name, item_type, base_uom_id, created_by)
+         VALUES('SP-DUP','Brake Pad Set','SPARE',$1,$2)`, [ids.uom, admUid]);
+const dupId = (await q("SELECT item_id FROM md_item WHERE item_no='SP-DUP'"))[0].item_id;
+const cand = await api('/api/admin/duplicate-candidates', admin.cookie);
+A('duplicate-candidates surfaces the SP-0001 ~ SP-DUP name match',
+  cand.status === 200 && cand.body.pairs.some((p) => [p.keep.item_id, p.merge.item_id].includes(dupId) && [p.keep.item_id, p.merge.item_id].includes(ids.spare)), cand.body);
+A('duplicate-candidates is admin-only (foreman -> 403)', (await api('/api/admin/duplicate-candidates', foreman.cookie)).status === 403);
+// give the duplicate real ledger history, then merge it into SP-0001
+await api('/api/stores/receive', keeper.cookie, 'POST', { item_id: dupId, location_id: ids.site, qty: 5, unit_cost: 100 });
+const dupLedBefore = Number((await q('SELECT COUNT(*) AS n FROM mv_stock_ledger WHERE item_id=$1', [dupId]))[0].n);
+const keepLedBefore = Number((await q('SELECT COUNT(*) AS n FROM mv_stock_ledger WHERE item_id=$1', [ids.spare]))[0].n);
+A('the duplicate has ≥1 ledger row before merge', dupLedBefore >= 1, dupLedBefore);
+const merged = await api('/api/admin/merge-items', admin.cookie, 'POST', { keepId: ids.spare, mergeId: dupId });
+A('merge-items 200 and reports the ledger rows moved', merged.status === 200 && merged.body.ledger_reassigned === dupLedBefore, merged.body);
+A('merge reassigns ledger rows: mergeId → 0, keepId gains them',
+  Number((await q('SELECT COUNT(*) AS n FROM mv_stock_ledger WHERE item_id=$1', [dupId]))[0].n) === 0 &&
+  Number((await q('SELECT COUNT(*) AS n FROM mv_stock_ledger WHERE item_id=$1', [ids.spare]))[0].n) === keepLedBefore + dupLedBefore, merged.body);
+A('the merged item is soft-deleted (is_active=false)', !(await q('SELECT is_active FROM md_item WHERE item_id=$1', [dupId]))[0].is_active);
+A('the duplicate’s stock balance was folded into keep (0 balance rows left)',
+  Number((await q('SELECT COUNT(*) AS n FROM inv_stock_balance WHERE item_id=$1', [dupId]))[0].n) === 0);
+A('merge-items is admin-only (foreman -> 403)', (await api('/api/admin/merge-items', foreman.cookie, 'POST', { keepId: ids.spare, mergeId: dupId })).status === 403);
+
 await end();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);
