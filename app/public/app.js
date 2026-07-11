@@ -41,9 +41,9 @@ $('#loginForm').addEventListener('submit', async (e) => {
 $('#logout').addEventListener('click', async () => { await api('/auth/logout', { method: 'POST' }); location.reload(); });
 $('#nav').addEventListener('click', (e) => { const a = e.target.closest('a[data-view]'); if (a) route(a.dataset.view); });
 
-const VIEWS = { dashboard, stores, mrn, purchase, oil, battery, workshop };
-const CRUMB = { dashboard: 'Overview', stores: 'Inventory', mrn: 'Requisitions', purchase: 'Procurement', oil: 'Lubricant book', battery: 'Serial lifecycle', workshop: 'Job costing' };
-const TITLE = { dashboard: 'Dashboard', stores: 'Stores', mrn: 'Requisitions (MRN)', purchase: 'Purchasing', oil: 'Oil & Lubricant', battery: 'Battery', workshop: 'Workshop' };
+const VIEWS = { dashboard, stores, mrn, purchase, oil, battery, workshop, reports };
+const CRUMB = { dashboard: 'Overview', stores: 'Inventory', mrn: 'Requisitions', purchase: 'Procurement', oil: 'Lubricant book', battery: 'Serial lifecycle', workshop: 'Job costing', reports: 'Reports & exports' };
+const TITLE = { dashboard: 'Dashboard', stores: 'Stores', mrn: 'Requisitions (MRN)', purchase: 'Purchasing', oil: 'Oil & Lubricant', battery: 'Battery', workshop: 'Workshop', reports: 'Reports' };
 async function route(v) {
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === v));
   $('#crumb').textContent = CRUMB[v]; $('#title').textContent = TITLE[v]; $('#topActions').innerHTML = '';
@@ -443,6 +443,45 @@ function labourForm(id) {
     { k: 'employee_id', l: 'Technician', sel: opt(M.employees, 'employee_id', 'employee_name') },
     { k: 'hours', l: 'Hours', type: 'number' }, { k: 'ot_hours', l: 'OT hours', type: 'number' },
   ], async (d) => { await api(`/api/jobcards/${id}/labour`, { method: 'POST', body: JSON.stringify(d) }); toast('Labour added'); openJob(id); });
+}
+
+/* ---------- reports & exports ---------- */
+const repNum = (x) => (x == null || x === '' ? '' : Number(x).toLocaleString('en-LK', { maximumFractionDigits: 2 }));
+async function reports() {
+  const v = $('#view'); v.innerHTML = '';
+  const cat = (await api('/api/reports')).reports;
+  const wrap = h(`<div style="display:flex;gap:18px;align-items:flex-start;flex-wrap:wrap">
+    <div class="rep-list" style="flex:0 0 260px;min-width:220px"></div><div class="rep-main" style="flex:1;min-width:340px"></div></div>`);
+  const list = wrap.querySelector('.rep-list'); const main = wrap.querySelector('.rep-main');
+  const listCard = h('<div class="card"><div class="card-h"><h3>Reports</h3></div><div class="card-b" style="padding:8px"></div></div>');
+  const lb = listCard.querySelector('.card-b');
+  const sel = (btn) => { lb.querySelectorAll('button').forEach((x) => { x.style.background = 'transparent'; x.style.borderLeft = '3px solid transparent'; }); btn.style.background = 'var(--panel-2)'; btn.style.borderLeft = '3px solid var(--accent)'; };
+  cat.forEach((r) => { const b = h(`<button class="btn" style="display:block;width:100%;text-align:left;margin:4px 0;border:none;border-left:3px solid transparent;border-radius:6px;background:transparent">${esc(r.title)}<div class="muted" style="font-size:11px;font-weight:400">${esc(r.desc)}</div></button>`); b.onclick = () => { sel(b); runReport(r, main); }; lb.append(b); });
+  list.append(listCard); v.append(wrap);
+  if (cat[0]) { sel(lb.querySelector('button')); runReport(cat[0], main); }
+}
+async function runReport(def, main, range) {
+  main.innerHTML = '<p class="muted">Running…</p>';
+  const from = (range && range.from) || '1900-01-01', to = (range && range.to) || '2999-12-31';
+  const qs = def.dated ? `?from=${from}&to=${to}` : '';
+  let rep;
+  try { rep = await api(`/api/reports/${def.key}${qs}`); } catch (e) { main.innerHTML = `<div class="card"><div class="card-b" style="color:var(--block)">${esc(e.message)}</div></div>`; return; }
+  const cols = rep.columns.map((c) => ({ h: c.h, k: c.k, n: c.n, r: c.n ? (row) => repNum(row[c.k]) : undefined }));
+  main.innerHTML = '';
+  const head = h(`<div class="row" style="margin-bottom:14px;align-items:flex-end;flex-wrap:wrap;gap:10px">
+    <div style="flex:1"><div class="crumb">${esc(rep.title)}</div><b>${rep.rows.length} row(s)</b></div>
+    ${def.dated ? `<div><label style="margin:0 0 4px">From</label><input type="date" id="repFrom" value="${from === '1900-01-01' ? '' : from}" style="width:148px"></div>
+    <div><label style="margin:0 0 4px">To</label><input type="date" id="repTo" value="${to === '2999-12-31' ? '' : to}" style="width:148px"></div>
+    <button class="btn sm" id="repRun">Run</button>` : ''}
+    <button class="btn sm primary" id="repCsv">Download CSV</button></div>`);
+  main.append(head, card(rep.title, table(cols, rep.rows)));
+  if (def.dated) head.querySelector('#repRun').onclick = () => runReport(def, main, { from: $('#repFrom').value || '1900-01-01', to: $('#repTo').value || '2999-12-31' });
+  head.querySelector('#repCsv').onclick = () => downloadCsv(rep);
+}
+function downloadCsv(rep) {
+  const cell = (s) => { s = String(s ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };
+  const csv = [rep.columns.map((c) => cell(c.h)).join(','), ...rep.rows.map((r) => rep.columns.map((c) => cell(r[c.k])).join(','))].join('\n');
+  const a = document.createElement('a'); a.href = URL.createObjectURL(new Blob([csv], { type: 'text/csv' })); a.download = `${rep.key}.csv`; a.click(); URL.revokeObjectURL(a.href);
 }
 
 /* ---------- shared forms ---------- */

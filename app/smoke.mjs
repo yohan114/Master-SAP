@@ -225,6 +225,24 @@ const conf = await api(`/api/purchase/pending/${pend[0].pending_id}/confirm`, ke
 A('confirm price 5000 -> revalue: variance 20000, MWAC 5000', conf.body.variance_amt === 20000 && conf.body.new_avg_cost === 5000, conf.body);
 A('pending list is now empty (all confirmed)', (await api('/api/purchase/pending', admin.cookie)).body.rows.length === 0);
 
+console.log('\nREPORTS & EXPORTS');
+const cat = (await api('/api/reports', admin.cookie)).body.reports;
+A('report catalogue lists 13+ reports', Array.isArray(cat) && cat.length >= 13, cat?.length);
+const runRep = async (k, qs = '') => (await api(`/api/reports/${k}${qs}`, admin.cookie)).body;
+const led = await runRep('stock-ledger');
+A('stock-ledger returns columns + movement rows', led.columns.length > 0 && led.rows.length > 0, { c: led.columns?.length, r: led.rows?.length });
+const bal = await runRep('stock-balance');
+A('stock-balance returns on-hand rows with value', bal.rows.length > 0 && bal.rows.every((r) => 'stock_value' in r), bal.rows?.length);
+const jcr = await runRep('job-costing');
+A('job-costing includes a costed job (total>0)', jcr.rows.some((r) => Number(r.total_job_cost) > 0), jcr.rows?.length);
+const sup = await runRep('supplier-spend');
+A('supplier-spend aggregates GRN value by supplier', sup.rows.length > 0 && sup.rows.some((r) => Number(r.total_received) > 0), sup.rows);
+const bl = await runRep('battery-lifecycle');
+A('battery-lifecycle returns the serial event history', bl.rows.length >= 5, bl.rows?.length);
+const aud = await runRep('audit-trail');
+A('audit-trail shows who posted each movement', aud.rows.length > 0 && aud.rows.some((r) => r.posted_by), aud.rows?.[0]);
+A('unknown report -> 404', (await api('/api/reports/does-not-exist', admin.cookie)).status === 404);
+
 await end();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

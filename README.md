@@ -8,7 +8,7 @@ used to be separate apps and Excel books run as **modules of a single master sys
 wired together so a stock or oil issue flows straight into a workshop job's final cost.
 
 > Status: the backend of all four domains + a unified web UI + a one‑command deploy kit are **built and
-> tested** (`app/`, 70/70 end‑to‑end), running on the **real migrated data** (2,825 items · 414 fleet
+> tested** (`app/`, 78/78 end‑to‑end), running on the **real migrated data** (2,825 items · 414 fleet
 > assets · 37 batteries · **LKR 13.09M opening stock**). See [`BUILD_BACKLOG.md`](BUILD_BACKLOG.md).
 
 ---
@@ -26,7 +26,8 @@ under four modules:
 | **Procurement** | Local/Head‑Office PO → receive (GRN) → pending‑price → confirm (revalues stock by the variance) |
 | **Oil / Lubricant** | receive · issue‑to‑vehicle · consumption‑by‑asset · book‑vs‑physical stock counts |
 | **Battery** | serial‑true lifecycle: register → install → transfer → return → scrap, with full history |
-| **Workshop** | job cards · labour (auto‑rated by grade) · parts · cost roll‑up · variance · close‑gating |
+| **Workshop** | job cards · TM/OM approvals · labour · parts · outside repair · cost roll‑up · variance · close‑gating |
+| **Reports** | 13 exportable reports (CSV): stock ledger · balance · movement · job costing · supplier spend · labour · battery lifecycle · variance · audit trail · … |
 
 **The unification:** a stores or oil issue can post straight onto a job card, so the job's material
 cost is the **real issued cost at moving‑average valuation** — not a re‑keyed number.
@@ -41,14 +42,14 @@ cd app && npm install
 export DB_ENGINE=sqlite SQLITE_DB=./umms.sqlite
 node init-db.js              # loads sql/schema.sqlite.sql into a fresh file
 npm run seed && npm start    # http://localhost:4000  (login: admin / ChangeMe@Admin1)
-npm run smoke                # 70/70 end-to-end
+npm run smoke                # 78/78 end-to-end
 
 # --- PostgreSQL (server / VPS) ---
 createdb umms && psql -d umms -f sql/schema.sql
 cd app && npm install
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=umms
 npm run seed && npm start    # http://localhost:4000
-npm run smoke                # 70/70 end-to-end
+npm run smoke                # 78/78 end-to-end
 ```
 Load your real data (from a machine with the legacy SQLite books):
 ```bash

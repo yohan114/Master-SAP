@@ -55,6 +55,7 @@ app.use('/api/purchase', require('./routes/purchase'));
 app.use('/api/oil', require('./routes/oil'));
 app.use('/api/battery', require('./routes/battery'));
 app.use('/api/mrn', require('./routes/mrn'));
+app.use('/api/reports', require('./routes/reports'));
 
 const PORT = process.env.PORT || 4000;
 async function start() {

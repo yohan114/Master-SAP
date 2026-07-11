@@ -10,10 +10,10 @@ wired together so a stock or oil issue flows straight into a job's final cost.
 - **SQLite** (`DB_ENGINE=sqlite`) — a single local file, zero DB server to run. Schema:
   `sql/schema.sqlite.sql` (generated from the Postgres schema — `node sql/gen-sqlite-schema.js`).
   Great for a laptop trial, a single‑PC install, or matching the legacy SQLite books. The whole
-  suite passes **70/70 on both engines** with the same code (`db.js` translates the handful of
+  suite passes **78/78 on both engines** with the same code (`db.js` translates the handful of
   Postgres‑isms and picks the engine from `DB_ENGINE` / `SQLITE_DB`).
 
-## What works (verified end‑to‑end — `npm run smoke`, 70/70)
+## What works (verified end‑to‑end — `npm run smoke`, 78/78)
 
 **One‑system integration (the point):** receive parts into stores → moving‑average cost rolls forward
 (10@1500 + 10@1700 → **1,600**) → issue to a workshop job → the issue **auto‑posts as a job part** →
@@ -81,6 +81,13 @@ by the live stock balance. All in one app.
 - **Close gating (core rule #3)** — cannot close until **both approvals are complete**, a cost roll‑up
   exists, and no cost is provisional (→ 409).
 
+### Reports & exports (`routes/reports.js`)
+- **13 read‑only reports** over the data every module captures: stock ledger, stock balance & valuation,
+  item movement, lubricant issue by vehicle, supplier spend, **job costing sheet**, labour summary,
+  open job cards, job cost variance, battery lifecycle, battery by vehicle, pending pricing, audit trail.
+- Each is **site‑scoped**, **date‑filterable**, and **CSV‑exportable** from the UI. A small registry maps
+  a report key → columns + a SQL builder; one runner applies the date range + the caller's site scope.
+
 ## Files
 | Path | Purpose |
 |---|---|
@@ -96,7 +103,8 @@ by the live stock balance. All in one app.
 | `routes/purchase.js` | Procurement (Local/HO PO · approve · receive→GRN · pending‑price · confirm→revalue) |
 | `routes/oil.js` | the Oil/Lubricant module (receive · issue‑to‑vehicle · consumption · stock count) |
 | `routes/battery.js` | the Battery module (serial lifecycle · event history) |
-| `routes/jobcards.js` | the Workshop module (jobs · labour · parts · cost · close) |
+| `routes/jobcards.js` | the Workshop module (jobs · approvals · labour · parts · outside repair · progress · cost · close) |
+| `routes/reports.js` | Reports registry — 13 site‑scoped, date‑filtered, CSV‑exportable report views |
 | `server.js` | wiring |
 | `seed.js` | minimal masters + `admin`/`foreman`/`viewer` users |
 | `smoke.mjs` | end‑to‑end proof |
@@ -126,7 +134,7 @@ export DB_ENGINE=sqlite SQLITE_DB=./umms.sqlite   # one local file
 node init-db.js       # loads sql/schema.sqlite.sql into a fresh file
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 70/70  (start the server first, in another shell)
+npm run smoke         # 78/78  (start the server first, in another shell)
 ```
 
 ### Option B — PostgreSQL
@@ -138,7 +146,7 @@ cd app && npm install
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=umms   # PG* env, no secrets in code
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 70/70
+npm run smoke         # 78/78
 ```
 
 The same `migrate-legacy.js` / `backfill-opening.js` work under either engine (prefix `DB_ENGINE=sqlite`
