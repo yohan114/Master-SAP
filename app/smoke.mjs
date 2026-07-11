@@ -29,7 +29,8 @@ const ids = (await q(`SELECT
   (SELECT asset_id FROM md_asset WHERE asset_no='VEH-0002') asset2,
   (SELECT employee_id FROM md_employee WHERE employee_no='EMP-0001') tech,
   (SELECT uom_id FROM md_uom WHERE uom_code='NOS') uom,
-  (SELECT location_id FROM md_location WHERE location_code='ST2') site2`))[0];
+  (SELECT location_id FROM md_location WHERE location_code='ST2') site2,
+  (SELECT supplier_id FROM md_supplier WHERE supplier_no='SUP-0001') supplier`))[0];
 
 console.log('AUTH + RBAC');
 const admin = await login('admin', 'ChangeMe@Admin1');
@@ -40,8 +41,12 @@ A('viewer CANNOT create a job -> 403', (await api('/api/jobcards', viewer.cookie
 
 console.log('\nJOB FLOW (foreman)');
 const job = await api('/api/jobcards', foreman.cookie, 'POST', { asset_id: ids.asset, location_id: ids.site, job_type: 'BREAKDOWN', estimated_cost: 10000, reported_defect: 'Brake failure' });
-A('create job -> jobcard_no JOB-HQ-..', job.status === 200 && /^JOB-HQ-\d\d-\d{6}$/.test(job.body.jobcard_no), job.body);
+A('create job -> jobcard_no JOB-HQ-.. , starts PENDING_TM_APPROVAL', job.status === 200 && /^JOB-HQ-\d\d-\d{6}$/.test(job.body.jobcard_no) && job.body.jobcard_status === 'PENDING_TM_APPROVAL', job.body);
 const jid = job.body.jobcard_id;
+A('foreman CANNOT TM-approve (segregation of duties -> 403)', (await api(`/api/jobcards/${jid}/approve-tm`, foreman.cookie, 'POST', {})).status === 403);
+A('close blocked before approvals -> 409 (core rule #3)', (await api(`/api/jobcards/${jid}/close`, foreman.cookie, 'POST')).status === 409);
+A('TM approve -> PENDING_OM_APPROVAL', (await api(`/api/jobcards/${jid}/approve-tm`, admin.cookie, 'POST', {})).body.jobcard_status === 'PENDING_OM_APPROVAL');
+A('OM approve -> APPROVED', (await api(`/api/jobcards/${jid}/approve-om`, admin.cookie, 'POST', {})).body.jobcard_status === 'APPROVED');
 
 const lab = await api(`/api/jobcards/${jid}/labour`, foreman.cookie, 'POST', { employee_id: ids.tech, hours: 8, ot_hours: 2 });
 A('labour cost = 8*500 + 2*500*1.5 = 5500', lab.body.labour_cost === 5500, lab.body);
@@ -57,19 +62,41 @@ A('roll-up: material 3000 / labour 5500 / general 250 / total 8750',
 A('variance vs 10000 estimate = -1250 (-12.5%)', cost.body.variance_amt === -1250 && cost.body.variance_pct === -12.5, cost.body);
 
 const close = await api(`/api/jobcards/${jid}/close`, foreman.cookie, 'POST');
-A('close (no provisional) -> 200 CLOSED', close.status === 200 && close.body.jobcard_status === 'CLOSED', close.body);
+A('close (approved, no provisional) -> 200 CLOSED', close.status === 200 && close.body.jobcard_status === 'CLOSED', close.body);
 
 console.log('\nPROVISIONAL CLOSE GATING');
 const job2 = await api('/api/jobcards', foreman.cookie, 'POST', { asset_id: ids.asset, location_id: ids.site, estimated_cost: 5000 });
 const j2 = job2.body.jobcard_id;
+await api(`/api/jobcards/${j2}/approve-tm`, admin.cookie, 'POST', {});
+await api(`/api/jobcards/${j2}/approve-om`, admin.cookie, 'POST', {});
 await api(`/api/jobcards/${j2}/parts`, foreman.cookie, 'POST', { item_id: ids.spare, qty: 1, unit_cost: 2000, is_provisional: true });
 const cost2 = await api(`/api/jobcards/${j2}/cost`, foreman.cookie, 'POST');
 A('cost flags is_provisional=true', cost2.body.is_provisional === true, cost2.body);
-A('close blocked while provisional -> 409', (await api(`/api/jobcards/${j2}/close`, foreman.cookie, 'POST')).status === 409);
+A('close blocked while provisional -> 409 (even when fully approved)', (await api(`/api/jobcards/${j2}/close`, foreman.cookie, 'POST')).status === 409);
 
 console.log('\nGET job shows lines + cost');
 const got = await api(`/api/jobcards/${jid}`, admin.cookie);
 A('get job returns labour+parts+cost', got.body.labour.length === 1 && got.body.parts.length === 2 && Number(got.body.cost.total_job_cost) === 8750, { l: got.body.labour?.length, p: got.body.parts?.length, t: got.body.cost?.total_job_cost });
+
+console.log('\nWORKSHOP LIFECYCLE (TM→OM approval → start → progress → outside repair → complete → close)');
+const jobL = await api('/api/jobcards', foreman.cookie, 'POST', { asset_id: ids.asset, location_id: ids.site, estimated_cost: 20000, reported_defect: 'Gearbox overhaul' });
+const jL = jobL.body.jobcard_id;
+A('cannot start before approval -> 409', (await api(`/api/jobcards/${jL}/start`, foreman.cookie, 'POST', {})).status === 409);
+A('TM approve -> PENDING_OM_APPROVAL', (await api(`/api/jobcards/${jL}/approve-tm`, admin.cookie, 'POST', {})).body.jobcard_status === 'PENDING_OM_APPROVAL');
+A('OM approve -> APPROVED', (await api(`/api/jobcards/${jL}/approve-om`, admin.cookie, 'POST', {})).body.jobcard_status === 'APPROVED');
+A('start work -> IN_PROGRESS', (await api(`/api/jobcards/${jL}/start`, foreman.cookie, 'POST', {})).body.jobcard_status === 'IN_PROGRESS');
+const prog = await api(`/api/jobcards/${jL}/progress`, foreman.cookie, 'POST', { work_done: 'Stripped gearbox, inspected bearings', pct_complete: 40, hours_spent: 6 });
+A('daily progress log entry added', !!prog.body.progress_id && prog.body.pct_complete === 40, prog.body);
+const osr = await api(`/api/jobcards/${jL}/outside-repair`, foreman.cookie, 'POST', { subcontractor_id: ids.supplier, description: 'Crankshaft grinding', actual_cost: 15000, osr_status: 'RECEIVED' });
+A('outside/subcontract repair captured (OSR-.., actual 15000)', /^OSR-HQ-\d\d-\d{6}$/.test(osr.body.osr_no) && osr.body.actual_cost === 15000, osr.body);
+await api(`/api/jobcards/${jL}/labour`, foreman.cookie, 'POST', { employee_id: ids.tech, hours: 4 });   // 4*500 = 2000
+A('complete work -> WORK_COMPLETED', (await api(`/api/jobcards/${jL}/complete`, foreman.cookie, 'POST', {})).body.jobcard_status === 'WORK_COMPLETED');
+const costL = await api(`/api/jobcards/${jL}/cost`, foreman.cookie, 'POST');
+A('cost roll-up folds in the outside repair: outside 15000 + labour 2000 = 17000',
+  costL.body.outside_repair_cost === 15000 && costL.body.labour_cost === 2000 && costL.body.total_job_cost === 17000, costL.body);
+const gotL = await api(`/api/jobcards/${jL}`, admin.cookie);
+A('job detail carries 1 progress entry + 1 outside repair', gotL.body.progress.length === 1 && gotL.body.outside.length === 1, { p: gotL.body.progress?.length, o: gotL.body.outside?.length });
+A('close (approved + costed) -> CLOSED', (await api(`/api/jobcards/${jL}/close`, foreman.cookie, 'POST')).body.jobcard_status === 'CLOSED');
 
 console.log('\nONE SYSTEM: stores issue flows into a job cost (MWAC ledger)');
 const keeper = await login('keeper', 'ChangeMe@Keep1');

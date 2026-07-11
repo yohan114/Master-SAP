@@ -45,7 +45,7 @@ router.post('/', requirePerm('JOB.WRITE'), async (req, res) => {
       const r = await c.query(
         `INSERT INTO tx_jobcard(jobcard_no, jobcard_date, asset_id, location_id, job_type,
              reported_defect, estimated_cost, jobcard_status, opened_at, site_id, created_by)
-         VALUES($1,$2,$3,$4,$5,$6,$7,'IN_PROGRESS', now(), $8,$9)
+         VALUES($1,$2,$3,$4,$5,$6,$7,'PENDING_TM_APPROVAL', now(), $8,$9)
          RETURNING jobcard_id, jobcard_no, jobcard_status`,
         [no, jobcard_date, asset_id, location_id, job_type, reported_defect, money(estimated_cost), site_id, uid]);
       return r.rows[0];
@@ -72,8 +72,117 @@ router.get('/:id', async (req, res) => {
        FROM tx_job_parts jp JOIN md_item i ON i.item_id=jp.item_id
        WHERE jp.jobcard_id=$1 AND jp.is_active ORDER BY jp.job_part_id`, [id]);
     jc.cost = await one('SELECT * FROM cost_job_summary WHERE jobcard_id=$1', [id]);
+    jc.progress = await q(`SELECT jp.progress_id, jp.progress_date, jp.work_done, jp.pct_complete, jp.hours_spent,
+              e.employee_name AS logged_by
+       FROM tx_job_progress jp LEFT JOIN md_employee e ON e.employee_id=jp.logged_by_employee_id
+       WHERE jp.jobcard_id=$1 AND jp.is_active ORDER BY jp.progress_id`, [id]);
+    jc.outside = await q(`SELECT o.osr_id, o.osr_no, o.subcontractor_id, s.supplier_name, o.description,
+              o.estimated_cost, o.actual_cost, o.osr_status
+       FROM tx_job_outside_repair o JOIN md_supplier s ON s.supplier_id=o.subcontractor_id
+       WHERE o.jobcard_id=$1 AND o.is_active ORDER BY o.osr_id`, [id]);
     res.json(jc);
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ---- Lifecycle: approvals → start → progress → complete --------------------
+// Transport-manager then operational-manager approval (segregation of duties), then workshop
+// execution. Each step is gated on the current status so the flow can't be skipped.
+async function loadJob(id) { return one('SELECT jobcard_id, jobcard_status, site_id, tm_approved_at, om_approved_at FROM tx_jobcard WHERE jobcard_id=$1 AND is_active', [id]); }
+
+router.post('/:id/approve-tm', requirePerm('JOB.APPROVE_TM'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const jc = await loadJob(id);
+    if (!jc) return res.status(404).json({ error: 'Job card not found' });
+    if (jc.jobcard_status !== 'PENDING_TM_APPROVAL') return res.status(409).json({ error: `job is ${jc.jobcard_status}; not awaiting TM approval` });
+    await q("UPDATE tx_jobcard SET jobcard_status='PENDING_OM_APPROVAL', tm_approved_by=$1, tm_approved_at=now(), updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [req.user.user_id, id]);
+    res.json({ jobcard_id: id, jobcard_status: 'PENDING_OM_APPROVAL' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.post('/:id/approve-om', requirePerm('JOB.APPROVE_OM'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const jc = await loadJob(id);
+    if (!jc) return res.status(404).json({ error: 'Job card not found' });
+    if (jc.jobcard_status !== 'PENDING_OM_APPROVAL') return res.status(409).json({ error: `job is ${jc.jobcard_status}; not awaiting OM approval` });
+    await q("UPDATE tx_jobcard SET jobcard_status='APPROVED', om_approved_by=$1, om_approved_at=now(), updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [req.user.user_id, id]);
+    res.json({ jobcard_id: id, jobcard_status: 'APPROVED' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.post('/:id/reject', requirePerm('JOB.APPROVE_TM'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const jc = await loadJob(id);
+    if (!jc) return res.status(404).json({ error: 'Job card not found' });
+    if (!['PENDING_TM_APPROVAL', 'PENDING_OM_APPROVAL'].includes(jc.jobcard_status)) return res.status(409).json({ error: `job is ${jc.jobcard_status}; not pending approval` });
+    await q("UPDATE tx_jobcard SET jobcard_status='REJECTED', hold_reason=$1, updated_by=$2, updated_at=now() WHERE jobcard_id=$3", [(req.body || {}).reason || null, req.user.user_id, id]);
+    res.json({ jobcard_id: id, jobcard_status: 'REJECTED' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.post('/:id/start', requirePerm('JOB.WRITE'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const jc = await loadJob(id);
+    if (!jc) return res.status(404).json({ error: 'Job card not found' });
+    if (!['APPROVED', 'ASSIGNED_WORKSHOP', 'ON_HOLD'].includes(jc.jobcard_status)) return res.status(409).json({ error: `job is ${jc.jobcard_status}; must be APPROVED to start` });
+    await q("UPDATE tx_jobcard SET jobcard_status='IN_PROGRESS', work_started_at=COALESCE(work_started_at, now()), updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [req.user.user_id, id]);
+    res.json({ jobcard_id: id, jobcard_status: 'IN_PROGRESS' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+router.post('/:id/complete', requirePerm('JOB.WRITE'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const jc = await loadJob(id);
+    if (!jc) return res.status(404).json({ error: 'Job card not found' });
+    if (!['IN_PROGRESS', 'AWAITING_PARTS', 'AWAITING_OUTSIDE_REPAIR'].includes(jc.jobcard_status)) return res.status(409).json({ error: `job is ${jc.jobcard_status}; not in progress` });
+    await q("UPDATE tx_jobcard SET jobcard_status='WORK_COMPLETED', work_completed_at=now(), updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [req.user.user_id, id]);
+    res.json({ jobcard_id: id, jobcard_status: 'WORK_COMPLETED' });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Daily work-done log.
+router.post('/:id/progress', requirePerm('JOB.WRITE'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const b = req.body || {};
+    if (!b.work_done) return res.status(400).json({ error: 'work_done is required' });
+    const jc = await loadJob(id);
+    if (!jc) return res.status(404).json({ error: 'Job card not found' });
+    const r = await one(
+      `INSERT INTO tx_job_progress(jobcard_id, progress_date, work_done, pct_complete, hours_spent, logged_by_employee_id, status_snapshot, next_action, created_by)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING progress_id, progress_date, work_done, pct_complete, hours_spent`,
+      [id, b.progress_date || new Date().toISOString().slice(0, 10), b.work_done, Number(b.pct_complete) || 0, Number(b.hours_spent) || 0,
+       b.logged_by_employee_id || null, jc.jobcard_status, b.next_action || null, req.user.user_id]);
+    res.json({ ...r, pct_complete: Number(r.pct_complete), hours_spent: Number(r.hours_spent) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Outside / subcontract repair — its actual cost is picked up by the cost roll-up.
+router.post('/:id/outside-repair', requirePerm('JOB.OUTSIDE'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const b = req.body || {};
+    const jc = await loadJob(id);
+    if (!jc) return res.status(404).json({ error: 'Job card not found' });
+    const sub = b.subcontractor_id || (await one('SELECT supplier_id FROM md_supplier WHERE is_active ORDER BY supplier_id LIMIT 1') || {}).supplier_id;
+    if (!sub) return res.status(400).json({ error: 'subcontractor_id (a supplier) required' });
+    const uid = req.user.user_id;
+    const out = await tx(async (c) => {
+      const no = await nextNo('OSR', await siteCodeOf(jc.site_id), b.sent_date || new Date().toISOString().slice(0, 10), c);
+      const r = await c.query(
+        `INSERT INTO tx_job_outside_repair(osr_no, jobcard_id, subcontractor_id, description, sent_date, expected_return_date,
+             estimated_cost, actual_cost, osr_status, doc_status, site_id, created_by)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'POSTED',$10,$11) RETURNING osr_id, osr_no, actual_cost, osr_status`,
+        [no, id, sub, b.description || null, b.sent_date || new Date().toISOString().slice(0, 10), b.expected_return_date || null,
+         money(b.estimated_cost || 0), money(b.actual_cost || 0), b.osr_status || 'SENT', jc.site_id, uid]);
+      return r.rows[0];
+    });
+    res.json({ ...out, actual_cost: Number(out.actual_cost) });
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // ---- Labour ---------------------------------------------------------------
@@ -189,6 +298,9 @@ router.post('/:id/cost', requirePerm('JOB.COST'), async (req, res) => {
 router.post('/:id/close', requirePerm('JOB.CLOSE'), async (req, res) => {
   try {
     const id = Number(req.params.id);
+    const jc = await one('SELECT tm_approved_at, om_approved_at FROM tx_jobcard WHERE jobcard_id=$1 AND is_active', [id]);
+    if (!jc) return res.status(404).json({ error: 'Job card not found' });
+    if (!jc.tm_approved_at || !jc.om_approved_at) return res.status(409).json({ error: 'Cannot close: transport-manager and operational-manager approvals must be complete.' });
     const cost = await one('SELECT cost_status, is_provisional FROM cost_job_summary WHERE jobcard_id=$1', [id]);
     if (!cost || cost.cost_status !== 'CALCULATED') return res.status(409).json({ error: 'Compute the final cost before closing.' });
     if (cost.is_provisional) return res.status(409).json({ error: 'Cannot close: provisional-priced costs pending confirmation.' });

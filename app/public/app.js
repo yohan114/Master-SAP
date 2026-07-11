@@ -387,21 +387,56 @@ function newJob() {
     { k: 'estimated_cost', l: 'Estimated cost (LKR)', type: 'number' }, { k: 'reported_defect', l: 'Reported defect' },
   ], async (d) => { d.location_id = loc0(); const r = await api('/api/jobcards', { method: 'POST', body: JSON.stringify(d) }); toast('Job ' + r.jobcard_no + ' created'); openJob(r.jobcard_id); });
 }
+async function doJob(id, action, body = {}) {
+  try { const r = await api(`/api/jobcards/${id}/${action}`, { method: 'POST', body: JSON.stringify(body) }); toast(`Job ${action.replace(/-/g, ' ')} ✓`); openJob(id); return r; }
+  catch (e) { toast(e.message, true); }
+}
 async function openJob(id) {
   const j = await api('/api/jobcards/' + id);
   const c = j.cost || {};
-  const kpis = [['Material', c.material_cost], ['Labour', c.labour_cost], ['General', c.general_cost], ['Total', c.total_job_cost || j.total_job_cost]];
+  const s = j.jobcard_status;
+  const kpis = [['Material', c.material_cost], ['Labour', c.labour_cost], ['General', c.general_cost], ['Outside', c.outside_repair_cost], ['Total', c.total_job_cost || j.total_job_cost]];
   const v = $('#view'); v.innerHTML = ''; v.append(backBtn('workshop'));
   const head = h(`<div class="kpis">${kpis.map((k) => `<div class="kpi"><div class="v"><small>LKR</small> ${money(k[1])}</div><div class="l">${k[0]}</div></div>`).join('')}</div>`);
   v.append(head);
-  const actionBar = h('<div class="row" style="margin-bottom:18px"></div>');
-  if (can('JOB.LABOUR')) actionBar.append(btn('+ Labour', () => labourForm(id)));
-  if (can('JOB.PARTS')) actionBar.append(btn('+ Part (issue)', () => issueForm((/*items*/[]), 'stores', id)));
-  if (can('JOB.COST')) actionBar.append(btn('Compute cost', async () => { await api(`/api/jobcards/${id}/cost`, { method: 'POST' }); toast('Cost recomputed'); openJob(id); }));
-  if (can('JOB.CLOSE')) actionBar.append(btnP('Close job', async () => { try { await api(`/api/jobcards/${id}/close`, { method: 'POST' }); toast('Job closed'); openJob(id); } catch (e) { toast(e.message, true); } }));
-  v.append(card(`${j.jobcard_no} — ${j.asset_no} ${j.asset_name} · ${statusPill(j.jobcard_status)}`, actionBar));
+  const bar = h('<div class="row" style="margin-bottom:18px;flex-wrap:wrap"></div>');
+  // lifecycle (status-aware): TM approve -> OM approve -> start -> progress/complete
+  if (can('JOB.APPROVE_TM') && s === 'PENDING_TM_APPROVAL') bar.append(btnP('TM approve', () => doJob(id, 'approve-tm')));
+  if (can('JOB.APPROVE_OM') && s === 'PENDING_OM_APPROVAL') bar.append(btnP('OM approve', () => doJob(id, 'approve-om')));
+  if (can('JOB.WRITE') && ['APPROVED', 'ASSIGNED_WORKSHOP', 'ON_HOLD'].includes(s)) bar.append(btnP('Start work', () => doJob(id, 'start')));
+  if (can('JOB.WRITE') && ['IN_PROGRESS', 'AWAITING_PARTS', 'AWAITING_OUTSIDE_REPAIR'].includes(s)) {
+    bar.append(btn('Log progress', () => progressForm(id))); bar.append(btn('Complete work', () => doJob(id, 'complete')));
+  }
+  if (can('JOB.LABOUR')) bar.append(btn('+ Labour', () => labourForm(id)));
+  if (can('JOB.PARTS')) bar.append(btn('+ Part (issue)', () => issueForm([], 'stores', id)));
+  if (can('JOB.OUTSIDE')) bar.append(btn('+ Outside repair', () => outsideForm(id)));
+  if (can('JOB.COST')) bar.append(btn('Compute cost', () => doJob(id, 'cost')));
+  if (can('JOB.CLOSE')) bar.append(btnP('Close job', () => doJob(id, 'close')));
+  const info = h(`<div class="row" style="margin-bottom:12px">
+    <div><div class="crumb">Status</div>${statusPill(s)}</div>
+    <div><div class="crumb">Asset</div><b>${esc(j.asset_no)} · ${esc(j.asset_name)}</b></div>
+    <div><div class="crumb">Type</div><b>${esc(j.job_type)}</b></div>
+    ${j.promised_date ? `<div><div class="crumb">Promised</div><b>${esc(j.promised_date)}</b></div>` : ''}</div>`);
+  const wrap = document.createElement('div'); wrap.append(info, bar);
+  v.append(card(esc(j.jobcard_no), wrap));
   v.append(card('Labour', table([{ h: 'No', k: 'labour_no' }, { h: 'Technician', k: 'employee_name' }, { h: 'Hrs', n: true, k: 'hours' }, { h: 'OT', n: true, k: 'ot_hours' }, { h: 'Rate', n: true, r: (r) => money(r.hourly_rate) }, { h: 'Cost', n: true, r: (r) => money(r.labour_cost) }], j.labour)));
   v.append(card('Parts', table([{ h: 'Item', k: 'item_name' }, { h: 'Qty', n: true, k: 'qty' }, { h: 'Unit', n: true, r: (r) => money(r.unit_cost) }, { h: 'Cost', n: true, r: (r) => money(r.part_cost) }, { h: '', r: (r) => r.is_general ? '<span class="pill p-idle">general</span>' : r.is_provisional ? '<span class="pill p-build">provisional</span>' : '' }], j.parts)));
+  if ((j.outside || []).length || can('JOB.OUTSIDE'))
+    v.append(card('Outside / subcontract repair', table([{ h: 'OSR No', k: 'osr_no' }, { h: 'Subcontractor', k: 'supplier_name' }, { h: 'Description', k: 'description' }, { h: 'Actual', n: true, r: (r) => money(r.actual_cost) }, { h: 'Status', r: (r) => statusPill(r.osr_status) }], j.outside || [])));
+  v.append(card('Progress log', table([{ h: 'Date', k: 'progress_date' }, { h: 'Work done', k: 'work_done' }, { h: '%', n: true, r: (r) => int(r.pct_complete) }, { h: 'Hrs', n: true, r: (r) => int(r.hours_spent) }, { h: 'By', r: (r) => esc(r.logged_by || '—') }], j.progress || [])));
+}
+function progressForm(id) {
+  formModal('Log daily progress', [
+    { k: 'work_done', l: 'Work done' },
+    { k: 'pct_complete', l: '% complete', type: 'number' }, { k: 'hours_spent', l: 'Hours spent', type: 'number' },
+  ], async (d) => { await api(`/api/jobcards/${id}/progress`, { method: 'POST', body: JSON.stringify(d) }); toast('Progress logged'); openJob(id); });
+}
+function outsideForm(id) {
+  formModal('Outside / subcontract repair', [
+    { k: 'subcontractor_id', l: 'Subcontractor', sel: opt(M.suppliers || [], 'supplier_id', 'supplier_name') },
+    { k: 'description', l: 'Description' }, { k: 'actual_cost', l: 'Actual cost (LKR)', type: 'number' },
+    { k: 'osr_status', l: 'Status', sel: ['SENT', 'IN_PROGRESS', 'RECEIVED', 'INVOICED', 'CLOSED'].map((x) => `<option>${x}</option>`).join('') },
+  ], async (d) => { await api(`/api/jobcards/${id}/outside-repair`, { method: 'POST', body: JSON.stringify(d) }); toast('Outside repair added'); openJob(id); });
 }
 function labourForm(id) {
   formModal('Add labour', [

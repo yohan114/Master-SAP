@@ -4,11 +4,14 @@ const { q, one, tx } = require('./db');
 const { hashPassword } = require('./auth/password');
 
 const PERMS = ['ADMIN.ALL', 'READ.ALL_SITES', 'JOB.WRITE', 'JOB.LABOUR', 'JOB.PARTS', 'JOB.COST', 'JOB.CLOSE',
+  'JOB.APPROVE_TM', 'JOB.APPROVE_OM', 'JOB.OUTSIDE',
   'STORES.RECEIVE', 'STORES.ISSUE', 'STORES.MRN', 'STORES.TRANSFER', 'STORES.PO', 'STORES.PRICE', 'STORES.READ',
   'OIL.RECEIVE', 'OIL.ISSUE', 'OIL.COUNT', 'OIL.READ', 'BATTERY.WRITE', 'BATTERY.ISSUE', 'BATTERY.READ'];
 const ROLES = {
   system_admin: ['ADMIN.ALL', 'READ.ALL_SITES'],
-  foreman:      ['JOB.WRITE', 'JOB.LABOUR', 'JOB.PARTS', 'JOB.COST', 'JOB.CLOSE', 'STORES.ISSUE', 'STORES.MRN', 'STORES.READ',
+  transport_manager:   ['JOB.APPROVE_TM', 'READ.ALL_SITES'],
+  operations_manager:  ['JOB.APPROVE_OM', 'READ.ALL_SITES'],
+  foreman:      ['JOB.WRITE', 'JOB.LABOUR', 'JOB.PARTS', 'JOB.COST', 'JOB.CLOSE', 'JOB.OUTSIDE', 'STORES.ISSUE', 'STORES.MRN', 'STORES.READ',
                  'OIL.ISSUE', 'OIL.READ', 'BATTERY.ISSUE', 'BATTERY.READ'],
   storekeeper:  ['STORES.RECEIVE', 'STORES.ISSUE', 'STORES.MRN', 'STORES.TRANSFER', 'STORES.PO', 'STORES.PRICE', 'STORES.READ',
                  'OIL.RECEIVE', 'OIL.ISSUE', 'OIL.COUNT', 'OIL.READ', 'BATTERY.WRITE', 'BATTERY.ISSUE', 'BATTERY.READ'],
@@ -18,6 +21,8 @@ const USERS = [
   ['admin',   'ChangeMe@Admin1', 'System Admin', 'system_admin'],
   ['foreman', 'ChangeMe@Fore1',  'Workshop Foreman', 'foreman'],
   ['keeper',  'ChangeMe@Keep1',  'Store Keeper', 'storekeeper'],
+  ['tm',      'ChangeMe@TM1',    'Transport Manager', 'transport_manager'],
+  ['om',      'ChangeMe@OM1',    'Operations Manager', 'operations_manager'],
   ['viewer',  'ChangeMe@View1',  'Read Only', 'viewer'],
 ];
 
