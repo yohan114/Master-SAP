@@ -271,6 +271,15 @@ const orDel = await api(`/api/jobcards/${jOR}/outside-repairs/${orPost.body.osr_
 A('DELETE outside-repairs removes it and re-runs the roll-up (total back to 0)',
   orDel.body.total_job_cost === 0 && (await api(`/api/jobcards/${jOR}/outside-repairs`, foreman.cookie)).body.count === 0, orDel.body);
 
+console.log('\nDASHBOARD KPIs (consolidated endpoint + 7-day trend)');
+const kp = (await api('/api/dashboard/kpis', admin.cookie)).body;
+A('kpis returns all 7 requested fields', ['stockValue', 'openJobCards', 'pendingMRNs', 'reorderAlerts', 'batteriesWarrantyDue', 'lubricantDaysCover', 'pendingPricing'].every((f) => f in kp), Object.keys(kp));
+A('stockValue is a positive number', typeof kp.stockValue === 'number' && kp.stockValue > 0, kp.stockValue);
+A('openJobCards counts non-terminal jobs (≥1)', typeof kp.openJobCards === 'number' && kp.openJobCards >= 1, kp.openJobCards);
+A('reorderAlerts flags low items (≥1)', kp.reorderAlerts >= 1, kp.reorderAlerts);
+A('batteriesWarrantyDue flags the expired battery (≥1)', kp.batteriesWarrantyDue >= 1, kp.batteriesWarrantyDue);
+A('stockTrend is a dense 7-day {date,net} series', Array.isArray(kp.stockTrend) && kp.stockTrend.length === 7 && 'date' in kp.stockTrend[0] && 'net' in kp.stockTrend[0], kp.stockTrend?.length);
+
 await end();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

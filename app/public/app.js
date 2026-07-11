@@ -65,23 +65,61 @@ const card = (title, bodyEl, headExtra = '') => {
 
 /* ---------- dashboard ---------- */
 async function dashboard() {
-  const s = await api('/api/summary');
+  const k = await api('/api/dashboard/kpis');
   const jobs = (await api('/api/jobcards')).rows;
   const kpis = [
-    ['Stores items', int(s.stores_items)], ['Oil products', int(s.oil_products)],
-    ['Fleet assets', int(s.assets)], ['Batteries', `${int(s.batteries)} <small>/ ${int(s.batteries_in_service)} fitted</small>`],
-    ['Open MRNs', int(s.mrns_open)], ['Open POs', int(s.pos_open)],
-    ['Pending pricing', int(s.pending_pricing)], ['Open jobs', int(s.jobs_open)],
-    ['Stock value', `<small>LKR</small> ${money(s.stock_value)}`],
+    { l: 'Stock value', v: k.stockValue, money: true, pre: 'LKR' },
+    { l: 'Open job cards', v: k.openJobCards },
+    { l: 'Pending MRNs', v: k.pendingMRNs },
+    { l: 'Reorder alerts', v: k.reorderAlerts, warn: true },
+    { l: 'Batteries warranty due', v: k.batteriesWarrantyDue, warn: true },
+    { l: 'Lubricant days cover', v: k.lubricantDaysCover, dec: 1 },
+    { l: 'Pending pricing', v: k.pendingPricing, warn: true },
   ];
   const v = $('#view'); v.innerHTML = '';
-  v.append(h(`<div class="kpis">${kpis.map((k) => `<div class="kpi"><div class="v">${k[1]}</div><div class="l">${k[0]}</div></div>`).join('')}</div>`));
+  const row = h(`<div class="kpis">${kpis.map((x, i) =>
+    `<div class="kpi"><div class="v${x.warn && Number(x.v) > 0 ? ' warn' : ''}" data-kpi="${i}">${x.pre ? `<small>${x.pre}</small> ` : ''}0</div><div class="l">${esc(x.l)}</div></div>`).join('')}</div>`);
+  v.append(row);
+  kpis.forEach((x, i) => animateCount(row.querySelector(`[data-kpi="${i}"]`), x));   // count up 0 → real value
+  v.append(card('Stock movement — last 7 days', sparkline(k.stockTrend || [])));
   await alertsPanel(v);
   v.append(card('Recent job cards', table([
     { h: 'Job No', k: 'jobcard_no' }, { h: 'Asset', r: (r) => esc(`${r.asset_no} · ${r.asset_name}`) },
     { h: 'Type', k: 'job_type' }, { h: 'Status', r: (r) => statusPill(r.jobcard_status) },
     { h: 'Cost', n: true, r: (r) => money(r.total_job_cost) },
   ], jobs.slice(0, 8), { click: (r) => openJob(r.jobcard_id) })));
+}
+// Count a KPI up from 0 to its real value over ~800ms (ease-out cubic).
+function animateCount(el, x, dur = 800) {
+  const pre = x.pre ? `<small>${esc(x.pre)}</small> ` : '';
+  if (x.v == null) { el.innerHTML = pre + '—'; return; }               // e.g. no lubricant consumption yet
+  const target = Number(x.v) || 0;
+  const fmt = (val) => x.money ? money(val)
+    : x.dec ? (Math.round(val * 10) / 10).toLocaleString('en-LK', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+      : int(Math.round(val));
+  const start = performance.now();
+  const step = (t) => {
+    const p = Math.min(1, (t - start) / dur), e = 1 - Math.pow(1 - p, 3);
+    el.innerHTML = pre + fmt(target * e);
+    if (p < 1) requestAnimationFrame(step); else el.innerHTML = pre + fmt(target);
+  };
+  requestAnimationFrame(step);
+}
+// 7-day net stock-movement sparkline as inline SVG (Chart.js isn't in this project; zero deps).
+function sparkline(trend) {
+  const W = 720, H = 96, pad = 10;
+  const vals = trend.map((t) => Number(t.net) || 0);
+  const max = Math.max(1, ...vals.map((n) => Math.abs(n)));
+  const x = (i) => pad + i * ((W - 2 * pad) / Math.max(1, trend.length - 1));
+  const y = (val) => H / 2 - (val / max) * (H / 2 - pad);
+  const pts = vals.map((val, i) => `${x(i).toFixed(1)},${y(val).toFixed(1)}`).join(' ');
+  const dots = vals.map((val, i) => `<circle cx="${x(i).toFixed(1)}" cy="${y(val).toFixed(1)}" r="3" fill="var(--accent)"><title>${esc(trend[i].date)}: ${int(val)}</title></circle>`).join('');
+  const labels = trend.map((t) => `<span class="muted" style="font-size:10px">${esc(String(t.date).slice(5))}</span>`).join('');
+  return h(`<div><svg viewBox="0 0 ${W} ${H}" width="100%" height="${H}" preserveAspectRatio="none" style="display:block">
+      <line x1="${pad}" y1="${H / 2}" x2="${W - pad}" y2="${H / 2}" stroke="var(--line-2)" stroke-width="1" stroke-dasharray="3 3"/>
+      <polyline points="${pts}" fill="none" stroke="var(--accent)" stroke-width="2.5" stroke-linejoin="round" stroke-linecap="round"/>${dots}
+    </svg><div class="row" style="justify-content:space-between;margin-top:6px">${labels}</div>
+    <div class="muted" style="font-size:11px;margin-top:2px">net stock movement (in − out) per day</div></div>`);
 }
 function statusPill(s) {
   const cls = s === 'CLOSED' ? 'p-live' : s === 'IN_SERVICE' ? 'p-live' : /HOLD|REJECT|CANCEL/.test(s) ? 'p-block'
