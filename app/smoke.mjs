@@ -12,7 +12,7 @@ const A = (n, c, g) => { (c ? pass++ : fail++); console.log(`  ${c ? 'PASS' : 'F
 async function login(username, password) {
   const r = await fetch(`${BASE}/auth/login`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ username, password }) });
   const cookie = (r.headers.getSetCookie?.() || []).map((c) => c.split(';')[0]).join('; ');
-  return { status: r.status, cookie };
+  return { status: r.status, cookie, body: await r.json().catch(() => ({})) };
 }
 async function api(path, cookie, method = 'GET', body) {
   const r = await fetch(`${BASE}${path}`, { method, headers: { 'content-type': 'application/json', cookie }, body: body ? JSON.stringify(body) : undefined });
@@ -378,6 +378,30 @@ A('the merged item is soft-deleted (is_active=false)', !(await q('SELECT is_acti
 A('the duplicate’s stock balance was folded into keep (0 balance rows left)',
   Number((await q('SELECT COUNT(*) AS n FROM inv_stock_balance WHERE item_id=$1', [dupId]))[0].n) === 0);
 A('merge-items is admin-only (foreman -> 403)', (await api('/api/admin/merge-items', foreman.cookie, 'POST', { keepId: ids.spare, mergeId: dupId })).status === 403);
+
+console.log('\nSECURITY — force password change + login audit + lockout');
+A('login flags must_change_password for a seeded (default-password) account', admin.body.must_change_password === true, admin.body);
+// change-password validation + rotation (on viewer; not used after this)
+A('change-password rejects a wrong current password -> 400',
+  (await api('/api/auth/change-password', viewer.cookie, 'POST', { current_password: 'nope', new_password: 'ViewerNew@2026' })).status === 400);
+A('change-password enforces the complexity policy (weak new password -> 400)',
+  (await api('/api/auth/change-password', viewer.cookie, 'POST', { current_password: 'ChangeMe@View1', new_password: 'weak' })).status === 400);
+A('change-password accepts a valid rotation -> 200',
+  (await api('/api/auth/change-password', viewer.cookie, 'POST', { current_password: 'ChangeMe@View1', new_password: 'ViewerNew@2026' })).status === 200);
+A('the old password no longer works -> 401', (await login('viewer', 'ChangeMe@View1')).status === 401);
+const relog = await login('viewer', 'ViewerNew@2026');
+A('the new password works and must_change_password is now false', relog.status === 200 && relog.body.must_change_password === false, relog.body);
+// brute-force lockout (on keeper; not used after this): 5 failures within the window -> 429
+let lastAttempt;
+for (let i = 0; i < 5; i++) lastAttempt = await login('keeper', 'WRONG-PASSWORD');
+A('the 5th failed attempt trips the lockout -> 429', lastAttempt.status === 429, lastAttempt.status);
+A('a locked account is refused even with the correct password -> 429', (await login('keeper', 'ChangeMe@Keep1')).status === 429);
+// login audit (admin-only)
+const la = await api('/api/admin/login-audit?limit=10', admin.cookie);
+A('login-audit returns a paginated attempt history for admin',
+  la.status === 200 && la.body.total > 0 && Array.isArray(la.body.rows) && la.body.rows.length > 0 && 'success' in la.body.rows[0], la.body?.total);
+A('login-audit records both successes and failures', la.body.rows.some((r) => r.success) && (await api('/api/admin/login-audit?limit=200', admin.cookie)).body.rows.some((r) => r.success === false));
+A('login-audit is admin-only (foreman -> 403)', (await api('/api/admin/login-audit', foreman.cookie)).status === 403);
 
 await end();
 console.log(`\n${pass} passed, ${fail} failed`);

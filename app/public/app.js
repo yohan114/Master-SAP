@@ -26,7 +26,9 @@ const loc0 = () => (M.locations[0] || {}).location_id;
 /* ---------- boot ---------- */
 async function boot() {
   try { ME = await api('/api/me'); } catch { return showLogin(); }
+  if (ME.user.must_change_password) return showChangePassword();   // forced rotation before anything else
   M = await api('/api/masters');
+  document.querySelector('#changepw')?.remove();
   $('#login').classList.add('hidden'); $('#app').classList.remove('hidden');
   $('#who').textContent = ME.user.full_name || ME.user.username;
   $('#whoRole').textContent = ME.perms.includes('ADMIN.ALL') ? 'Administrator' : `${ME.perms.length} permissions`;
@@ -34,6 +36,34 @@ async function boot() {
   route('dashboard');
 }
 function showLogin() { $('#app').classList.add('hidden'); $('#login').classList.remove('hidden'); }
+// Forced first-login password change — a full-screen gate; nothing else loads until it succeeds.
+function showChangePassword() {
+  $('#login').classList.add('hidden'); $('#app').classList.add('hidden');
+  document.querySelector('#changepw')?.remove();
+  const ov = h(`<div id="changepw" style="position:fixed;inset:0;display:grid;place-items:center;background:var(--bg);z-index:70;padding:20px">
+    <form class="login-card" style="width:min(420px,100%)">
+      <div class="brand-row"><div class="mark"></div><div><h1 style="font-size:18px">Set a new password</h1>
+        <div class="sub">Your account uses a default password — choose a new one to continue.</div></div></div>
+      <label>Current password</label><input name="current" type="password" autocomplete="current-password">
+      <label>New password</label><input name="next" type="password" autocomplete="new-password">
+      <label>Confirm new password</label><input name="confirm" type="password" autocomplete="new-password">
+      <div class="muted" style="font-size:11px;margin-top:8px">At least 10 characters, with an uppercase letter, a number, and a special character.</div>
+      <button class="btn primary btn-full" type="submit">Change password</button>
+      <div class="err" id="cpErr"></div>
+      <div style="text-align:center;margin-top:12px"><a class="muted" id="cpLogout" style="cursor:pointer;text-decoration:underline">Sign out</a></div>
+    </form></div>`);
+  document.body.append(ov);
+  ov.querySelector('#cpLogout').onclick = async () => { await api('/auth/logout', { method: 'POST' }); location.reload(); };
+  ov.querySelector('form').addEventListener('submit', async (e) => {
+    e.preventDefault(); const err = ov.querySelector('#cpErr'); err.textContent = '';
+    const current = ov.querySelector('[name=current]').value, next = ov.querySelector('[name=next]').value, confirm = ov.querySelector('[name=confirm]').value;
+    if (next !== confirm) { err.textContent = 'The new passwords do not match.'; return; }
+    try {
+      await api('/api/auth/change-password', { method: 'POST', body: JSON.stringify({ current_password: current, new_password: next }) });
+      ov.remove(); toast('Password changed'); boot();
+    } catch (e2) { err.textContent = e2.message; }
+  });
+}
 $('#loginForm').addEventListener('submit', async (e) => {
   e.preventDefault(); $('#loginErr').textContent = '';
   try { await api('/auth/login', { method: 'POST', body: JSON.stringify({ username: $('#u').value, password: $('#p').value }) }); boot(); }
@@ -715,6 +745,16 @@ async function admin() {
   ], pairs);
   tbl.querySelectorAll('tbody tr').forEach((tr, i) => { const b = tr.querySelector('[data-merge]'); if (b) b.onclick = () => mergeItems(pairs[i], tr); });
   v.append(card(`Duplicate candidates (${pairs.length})`, tbl));
+
+  // login audit — recent authentication attempts
+  const la = await api('/api/admin/login-audit?limit=25').catch(() => null);
+  if (la) v.append(card(`Recent login attempts (${la.total})`, table([
+    { h: 'When', r: (r) => esc(String(r.attempted_at || '').replace('T', ' ').slice(0, 19)) },
+    { h: 'User', r: (r) => esc(r.username || '—') },
+    { h: 'IP', r: (r) => esc(r.ip_address || '—') },
+    { h: 'Result', r: (r) => r.success ? '<span class="pill p-live">success</span>' : '<span class="pill p-block">failed</span>' },
+    { h: 'Agent', r: (r) => `<span class="muted" style="font-size:11px">${esc((r.user_agent || '').slice(0, 60))}</span>` },
+  ], la.rows)));
 }
 function mergeItems(p, tr) {
   formModal(`Merge — keep ${p.keep.item_no}`, [

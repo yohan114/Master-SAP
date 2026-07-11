@@ -8,7 +8,7 @@
 > [`00-design-contract.md`](./00-design-contract.md). This document does **not** restate
 > the contract; it materialises it as tables, keys, the append-only ledger, serial history
 > and indexes. Runnable DDL: [`../sql/schema.sql`](../sql/schema.sql) (PostgreSQL 14+,
-> verified to load clean: 75 tables, 408 FKs, 185 indexes).
+> verified to load clean: 76 tables, 409 FKs, 187 indexes).
 
 ---
 

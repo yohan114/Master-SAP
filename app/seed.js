@@ -60,8 +60,9 @@ const USERS = [
 
     // 3) users
     for (const [un, pw, fn, role] of USERS) {
-      await run(`INSERT INTO sec_user(username, full_name, password_hash, created_by) VALUES($1,$2,$3,$4)
-                 ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash`,
+      // seeded accounts ship with default passwords → force a change on first login
+      await run(`INSERT INTO sec_user(username, full_name, password_hash, must_change_password, created_by) VALUES($1,$2,$3,TRUE,$4)
+                 ON CONFLICT (username) DO UPDATE SET password_hash=EXCLUDED.password_hash, must_change_password=TRUE`,
                 [un, fn, hashPassword(pw), CB]);
       const uid = (await run('SELECT user_id FROM sec_user WHERE username=$1', [un]))[0].user_id;
       const rid = (await run('SELECT role_id FROM sec_role WHERE role_code=$1', [role]))[0].role_id;

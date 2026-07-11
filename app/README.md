@@ -1,6 +1,6 @@
 # UMMS app — one unified system (PostgreSQL **or** SQLite)
 
-**One system, one login, one database** on the validated 75‑table schema — not separate apps. Shared
+**One system, one login, one database** on the validated 76‑table schema — not separate apps. Shared
 foundation (auth, RBAC, site‑scope, numbering) and a **single inventory engine** (`lib/inventory.js`)
 under all four domains: **Stores**, **Oil/Lubricant**, **Battery**, and **Workshop Job‑Card + Costing** —
 wired together so a stock or oil issue flows straight into a job's final cost.
@@ -10,10 +10,10 @@ wired together so a stock or oil issue flows straight into a job's final cost.
 - **SQLite** (`DB_ENGINE=sqlite`) — a single local file, zero DB server to run. Schema:
   `sql/schema.sqlite.sql` (generated from the Postgres schema — `node sql/gen-sqlite-schema.js`).
   Great for a laptop trial, a single‑PC install, or matching the legacy SQLite books. The whole
-  suite passes **123/123 on both engines** with the same code (`db.js` translates the handful of
+  suite passes **134/134 on both engines** with the same code (`db.js` translates the handful of
   Postgres‑isms and picks the engine from `DB_ENGINE` / `SQLITE_DB`).
 
-## What works (verified end‑to‑end — `npm run smoke`, 123/123)
+## What works (verified end‑to‑end — `npm run smoke`, 134/134)
 
 **One‑system integration (the point):** receive parts into stores → moving‑average cost rolls forward
 (10@1500 + 10@1700 → **1,600**) → issue to a workshop job → the issue **auto‑posts as a job part** →
@@ -121,6 +121,17 @@ by the live stock balance. All in one app.
   RBAC is permission‑based). The web UI adds an **Admin** page (visible to admins only) listing the
   candidates with a **Merge** button per row.
 
+### Account security (`routes/auth.js`, `routes/account.js`, `auth/mw.js`)
+- **Force password change on first login** — seeded accounts ship with `must_change_password=TRUE`;
+  login returns the flag, and the web UI gates the whole app behind a **Set-a-new-password** screen until
+  it's cleared. **`POST /api/auth/change-password`** verifies the current password and enforces the policy
+  (**≥10 chars, 1 uppercase, 1 number, 1 special**), rotates the scrypt hash, and clears the flag.
+- **Login audit + brute-force lockout** — every attempt (success or fail) is written to `sec_audit_log`
+  (`user_id`, `username`, `ip_address` from `req.ip`, `user_agent`, `success`, `attempted_at`). **5
+  failures within 10 minutes** for one account arm a **15-minute lockout** (`locked_until`), and further
+  logins return **HTTP 429** until it lapses. **`GET /api/admin/login-audit`** is a paginated attempt
+  history (admin-only), surfaced as a *Recent login attempts* card on the Admin page.
+
 ## Files
 | Path | Purpose |
 |---|---|
@@ -176,7 +187,7 @@ export DB_ENGINE=sqlite SQLITE_DB=./umms.sqlite   # one local file
 node init-db.js       # loads sql/schema.sqlite.sql into a fresh file
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 123/123  (start the server first, in another shell)
+npm run smoke         # 134/134  (start the server first, in another shell)
 ```
 
 ### Option B — PostgreSQL
@@ -188,7 +199,7 @@ cd app && npm install
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=umms   # PG* env, no secrets in code
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 123/123
+npm run smoke         # 134/134
 ```
 
 The same `migrate-legacy.js` / `backfill-opening.js` work under either engine (prefix `DB_ENGINE=sqlite`

@@ -31,7 +31,7 @@ async function authMiddleware(req, res, next) {
     if (!token) return res.status(401).json({ error: 'Not authenticated.' });
     const s = await one('SELECT user_id FROM app_session WHERE token=$1 AND expires_at > now()', [token]);
     if (!s) return res.status(401).json({ error: 'Session expired.' });
-    const user = await one('SELECT user_id, username, full_name FROM sec_user WHERE user_id=$1 AND is_active AND NOT is_locked', [s.user_id]);
+    const user = await one('SELECT user_id, username, full_name, must_change_password FROM sec_user WHERE user_id=$1 AND is_active AND NOT is_locked', [s.user_id]);
     if (!user) return res.status(401).json({ error: 'Account unavailable.' });
     req.user = user;
     req.perms = new Set((await q(`

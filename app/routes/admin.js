@@ -140,4 +140,20 @@ router.post('/merge-items', async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
+// GET /login-audit — paginated login-attempt history (newest first). Admin-only (router-level gate).
+router.get('/login-audit', async (req, res) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50, 1), 200);
+    const page = Math.max(Number(req.query.page) || 1, 1);
+    const offset = (page - 1) * limit;
+    const rows = await q(
+      `SELECT a.audit_id, a.user_id, COALESCE(u.username, a.username) AS username,
+              a.ip_address, a.user_agent, a.success, a.attempted_at
+       FROM sec_audit_log a LEFT JOIN sec_user u ON u.user_id = a.user_id
+       ORDER BY a.audit_id DESC LIMIT $1 OFFSET $2`, [limit, offset]);
+    const total = Number((await one('SELECT COUNT(*) AS n FROM sec_audit_log')).n);
+    res.json({ page, limit, total, count: rows.length, rows: rows.map((r) => ({ ...r, success: !!r.success })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 module.exports = router;

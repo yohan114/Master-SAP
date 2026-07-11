@@ -28,6 +28,8 @@ CREATE TABLE sec_user (
     password_hash VARCHAR(200),
     auth_provider VARCHAR(20)  NOT NULL DEFAULT 'LOCAL',
     is_locked     BOOLEAN      NOT NULL DEFAULT FALSE,
+    must_change_password BOOLEAN NOT NULL DEFAULT TRUE,   -- force a rotation on first login
+    locked_until  TIMESTAMPTZ,                            -- set on repeated failed logins; temporary lockout
     last_login_at TIMESTAMPTZ,
     created_by    BIGINT       NOT NULL,
     created_at    TIMESTAMPTZ  NOT NULL DEFAULT now(),
@@ -171,6 +173,21 @@ CREATE TABLE sec_user_site (
     CONSTRAINT uq_sec_user_site UNIQUE (user_id, site_id),
     CONSTRAINT ck_sec_user_site_level CHECK (access_level IN ('READ','WRITE','APPROVE'))
 );
+
+-- Append-only log of every login attempt (success or failure) — feeds the admin login-audit view and
+-- the brute-force lockout. user_id is NULL when the typed username matched no account; the raw username
+-- is kept so unknown-user attempts are still visible.
+CREATE TABLE sec_audit_log (
+    audit_id     BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    user_id      BIGINT REFERENCES sec_user(user_id),
+    username     VARCHAR(60),
+    ip_address   VARCHAR(45),
+    user_agent   VARCHAR(300),
+    success      BOOLEAN NOT NULL,
+    attempted_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX ix_sec_audit_log_user ON sec_audit_log(user_id, attempted_at);
+CREATE INDEX ix_sec_audit_log_at ON sec_audit_log(audit_id);
 
 CREATE TABLE sys_number_series (
     series_id     BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
