@@ -15,8 +15,9 @@ wired together so a stock or oil issue flows straight into a workshop job's fina
 
 ## The system (`app/`)
 
-One Node + PostgreSQL app. Shared foundation (auth, RBAC, per‑site scope, `TYPE‑SITE‑YY‑NNNNNN`
-numbering) and a **single moving‑average inventory engine** under four modules:
+One Node app on **PostgreSQL or SQLite** (same code, engine chosen at boot). Shared foundation (auth,
+RBAC, per‑site scope, `TYPE‑SITE‑YY‑NNNNNN` numbering) and a **single moving‑average inventory engine**
+under four modules:
 
 | Module | What it does |
 |---|---|
@@ -29,12 +30,22 @@ numbering) and a **single moving‑average inventory engine** under four modules
 cost is the **real issued cost at moving‑average valuation** — not a re‑keyed number.
 
 ### Run it locally
+
+Runs on **PostgreSQL or SQLite** — same code, pick the engine at boot.
+
 ```bash
+# --- SQLite (simplest: no DB server, one local file) ---
+cd app && npm install
+export DB_ENGINE=sqlite SQLITE_DB=./umms.sqlite
+node init-db.js              # loads sql/schema.sqlite.sql into a fresh file
+npm run seed && npm start    # http://localhost:4000  (login: admin / ChangeMe@Admin1)
+npm run smoke                # 31/31 end-to-end
+
+# --- PostgreSQL (server / VPS) ---
 createdb umms && psql -d umms -f sql/schema.sql
 cd app && npm install
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=umms
-npm run seed                 # base roles/users + demo masters
-npm start                    # http://localhost:4000  (login: admin / ChangeMe@Admin1)
+npm run seed && npm start    # http://localhost:4000
 npm run smoke                # 31/31 end-to-end
 ```
 Load your real data (from a machine with the legacy SQLite books):
@@ -103,6 +114,7 @@ Master-SAP/
 │   ├── migrate-legacy.js, backfill-opening.js, seed.js, smoke.mjs
 │   └── README.md
 ├── sql/schema.sql       # the validated 74-table PostgreSQL schema the app runs on
+│   └── schema.sqlite.sql #   SQLite build of the same schema (gen-sqlite-schema.js) for DB_ENGINE=sqlite
 ├── docs/                # the solution blueprint (00–13)
 ├── reference/           # storesdb security port + runnable auth reference (the earlier, stores-only path)
 ├── deploy/              # go-live kit for the standalone secured stores app (localhost + VPS)

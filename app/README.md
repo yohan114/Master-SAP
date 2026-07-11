@@ -1,10 +1,17 @@
-# UMMS app (PostgreSQL) — one unified system
+# UMMS app — one unified system (PostgreSQL **or** SQLite)
 
-**One system, one login, one database** on the validated 74‑table PostgreSQL schema (`sql/schema.sql`) —
-not separate apps. Shared foundation (auth, RBAC, site‑scope, numbering) and a **single inventory
-engine** (`lib/inventory.js`) under all four domains: **Stores**, **Oil/Lubricant**, **Battery**, and
-**Workshop Job‑Card + Costing** — wired together so a stock or oil issue flows straight into a job's
-final cost.
+**One system, one login, one database** on the validated 74‑table schema — not separate apps. Shared
+foundation (auth, RBAC, site‑scope, numbering) and a **single inventory engine** (`lib/inventory.js`)
+under all four domains: **Stores**, **Oil/Lubricant**, **Battery**, and **Workshop Job‑Card + Costing** —
+wired together so a stock or oil issue flows straight into a job's final cost.
+
+**Pick your database engine at boot — the app is identical on both:**
+- **PostgreSQL** (default) — for the server/VPS deployment. Schema: `sql/schema.sql`.
+- **SQLite** (`DB_ENGINE=sqlite`) — a single local file, zero DB server to run. Schema:
+  `sql/schema.sqlite.sql` (generated from the Postgres schema — `node sql/gen-sqlite-schema.js`).
+  Great for a laptop trial, a single‑PC install, or matching the legacy SQLite books. The whole
+  suite passes **31/31 on both engines** with the same code (`db.js` translates the handful of
+  Postgres‑isms and picks the engine from `DB_ENGINE` / `SQLITE_DB`).
 
 ## What works (verified end‑to‑end — `npm run smoke`, 31/31)
 
@@ -45,7 +52,7 @@ by the live stock balance. All in one app.
 ## Files
 | Path | Purpose |
 |---|---|
-| `db.js` | pg pool + `q/one/tx` (transactions run with constraints deferred for the FK graph) |
+| `db.js` | dual‑engine data layer — `q/one/tx/exec`; Postgres (pool, deferred constraints) **or** SQLite (`node:sqlite`), selected by `DB_ENGINE`/`SQLITE_DB` |
 | `auth/password.js` | scrypt hashing (zero native deps) |
 | `auth/mw.js` | session table, `authMiddleware`, `requirePerm`, `scopeSql` (row‑level site filter) |
 | `lib/numbering.js` | `TYPE-SITE-YY-NNNNNN` via an atomic counter row |
@@ -75,6 +82,18 @@ STORES_DB=/path/inventory.db OIL_DB=/path/oilbook.db node migrate-legacy.js
 ```
 
 ## Run it (local)
+
+### Option A — SQLite (simplest: no database server)
+```bash
+cd app && npm install
+export DB_ENGINE=sqlite SQLITE_DB=./umms.sqlite   # one local file
+node init-db.js       # loads sql/schema.sqlite.sql into a fresh file
+npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
+npm start             # http://localhost:4000  (GET /health, POST /auth/login)
+npm run smoke         # 31/31  (start the server first, in another shell)
+```
+
+### Option B — PostgreSQL
 ```bash
 # 1. PostgreSQL 16, load the schema
 createdb umms && psql -d umms -f ../sql/schema.sql
@@ -83,8 +102,11 @@ cd app && npm install
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=umms   # PG* env, no secrets in code
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 12/12
+npm run smoke         # 31/31
 ```
+
+The same `migrate-legacy.js` / `backfill-opening.js` work under either engine (prefix `DB_ENGINE=sqlite`
+to load into the SQLite file instead of Postgres).
 
 ## Next on this platform (see `BUILD_BACKLOG.md`)
 - **Oil/Lubricant module** — build directly on this platform (products, issue ledger, consumption by
@@ -94,5 +116,5 @@ npm run smoke         # 12/12
 - Load all real data via the ETLs in `migration/` (reconciled: LKR 12.19M, 0 orphan FKs).
 - Outside‑repair into the job roll‑up; approval workflow (TM/OM) on close; unified UI + live dashboards.
 
-> Config is env‑driven (`PG*`, `PORT`, `NODE_ENV`); no secrets in code. Cookies become `Secure`
-> automatically under `NODE_ENV=production` behind TLS.
+> Config is env‑driven (`DB_ENGINE`/`SQLITE_DB` or `PG*`, plus `PORT`, `NODE_ENV`); no secrets in code.
+> Cookies become `Secure` automatically under `NODE_ENV=production` behind TLS.

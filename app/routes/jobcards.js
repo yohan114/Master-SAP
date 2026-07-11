@@ -131,7 +131,7 @@ router.post('/:id/parts', requirePerm('JOB.PARTS'), async (req, res) => {
        RETURNING job_part_id, part_cost, is_general, is_provisional`,
       [id, item_id, item.base_uom_id, qty, unit_cost, part_cost,
        !!is_general || item.item_type === 'GENERAL', !!is_provisional, jc.site_id, uid]);
-    res.json({ ...r, part_cost: Number(r.part_cost) });
+    res.json({ ...r, part_cost: Number(r.part_cost), is_general: !!r.is_general, is_provisional: !!r.is_provisional });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 

@@ -51,14 +51,17 @@ const requirePerm = (code) => (req, res, next) => {
   return res.status(403).json({ error: `Missing permission: ${code}` });
 };
 
-// Row-level site scope condition for a query, e.g. scopeSql(req,'jc') ->
-// { sql: ' AND jc.site_id = ANY($N)', params:[[...sites]] } or empty for all-site users.
+// Row-level site scope condition for a query, e.g. scopeSql(req,'jc',3) ->
+// { sql: ' AND jc.site_id IN ($3,$4)', params:[...sites] } or empty for all-site users.
+// Emits one placeholder per site (an IN-list) so it runs unchanged on Postgres and SQLite;
+// site params are always appended last by callers.
 function scopeSql(req, alias, startIdx) {
   const col = alias ? `${alias}.site_id` : 'site_id';
   if (req.perms.has('READ.ALL_SITES') || req.perms.has('ADMIN.ALL')) return { sql: '', params: [] };
   const sites = [...(req.sites || [])];
   if (!sites.length) return { sql: ' AND 1=0', params: [] };
-  return { sql: ` AND ${col} = ANY($${startIdx})`, params: [sites] };
+  const ph = sites.map((_, i) => `$${startIdx + i}`).join(',');
+  return { sql: ` AND ${col} IN (${ph})`, params: sites };
 }
 
 module.exports = { ensureSessionTable, createSession, destroySession, authMiddleware, requirePerm, scopeSql, SESSION_MS };

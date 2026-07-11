@@ -1,6 +1,10 @@
-// End-to-end proof of the Workshop module: login -> create job -> labour -> parts ->
-// cost roll-up -> close gating, plus an RBAC check. Requires the server running + seeded.
-import pg from 'pg';
+// End-to-end proof of the whole platform: login -> create job -> labour -> parts ->
+// cost roll-up -> close gating, stores/oil issue-to-job, battery lifecycle, plus RBAC.
+// Requires the server running + seeded. Runs on either engine (reads seed ids via the
+// app's own data layer, so it needs no direct Postgres connection under SQLite).
+import { createRequire } from 'node:module';
+const require = createRequire(import.meta.url);
+const { q, end } = require('./db');
 const BASE = process.env.BASE || 'http://127.0.0.1:4000';
 let pass = 0, fail = 0;
 const A = (n, c, g) => { (c ? pass++ : fail++); console.log(`  ${c ? 'PASS' : 'FAIL'}  ${n}${c ? '' : '  got=' + JSON.stringify(g)}`); };
@@ -15,8 +19,7 @@ async function api(path, cookie, method = 'GET', body) {
   return { status: r.status, body: await r.json().catch(() => ({})) };
 }
 
-const pool = new pg.Pool();
-const ids = (await pool.query(`SELECT
+const ids = (await q(`SELECT
   (SELECT location_id FROM md_location WHERE location_code='HQ') site,
   (SELECT asset_id FROM md_asset WHERE asset_no='VEH-0001') asset,
   (SELECT item_id FROM md_item WHERE item_no='SP-0001') spare,
@@ -24,7 +27,7 @@ const ids = (await pool.query(`SELECT
   (SELECT item_id FROM md_item WHERE item_no='LB-0001') lube,
   (SELECT item_id FROM md_item WHERE item_no='BT-0001') batmodel,
   (SELECT asset_id FROM md_asset WHERE asset_no='VEH-0002') asset2,
-  (SELECT employee_id FROM md_employee WHERE employee_no='EMP-0001') tech`)).rows[0];
+  (SELECT employee_id FROM md_employee WHERE employee_no='EMP-0001') tech`))[0];
 
 console.log('AUTH + RBAC');
 const admin = await login('admin', 'ChangeMe@Admin1');
@@ -64,7 +67,7 @@ A('close blocked while provisional -> 409', (await api(`/api/jobcards/${j2}/clos
 
 console.log('\nGET job shows lines + cost');
 const got = await api(`/api/jobcards/${jid}`, admin.cookie);
-A('get job returns labour+parts+cost', got.body.labour.length === 1 && got.body.parts.length === 2 && got.body.cost.total_job_cost === '8750.00', { l: got.body.labour?.length, p: got.body.parts?.length, t: got.body.cost?.total_job_cost });
+A('get job returns labour+parts+cost', got.body.labour.length === 1 && got.body.parts.length === 2 && Number(got.body.cost.total_job_cost) === 8750, { l: got.body.labour?.length, p: got.body.parts?.length, t: got.body.cost?.total_job_cost });
 
 console.log('\nONE SYSTEM: stores issue flows into a job cost (MWAC ledger)');
 const keeper = await login('keeper', 'ChangeMe@Keep1');
@@ -118,6 +121,6 @@ A('full history preserved: RECEIVED→INSTALLED→TRANSFERRED→RETURNED→SCRAP
 A('original vs current asset both preserved (original=truck, current=null after scrap)',
   Number(hist.body.original_asset_id) === Number(ids.asset) && hist.body.current_asset_id === null, { o: hist.body.original_asset_id, c: hist.body.current_asset_id });
 
-await pool.end();
+await end();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

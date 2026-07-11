@@ -31,6 +31,8 @@ jobs_costing.json
 *.db
 *.sqlite
 *.sqlite3
+*.sqlite-wal
+*.sqlite-shm
 !docs/**/*.csv
 
 # auth module runtime
