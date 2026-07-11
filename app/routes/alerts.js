@@ -25,16 +25,19 @@ router.get('/', async (req, res) => {
 
     // --- low stock: reorder + below-minimum (aggregated across locations) ---
     const low = await q(
-      `SELECT i.item_no, i.item_name, i.reorder_level, i.reorder_qty, i.min_qty,
+      `SELECT i.item_id, i.item_no, i.item_name, i.reorder_level, i.reorder_qty, i.min_qty,
               COALESCE((SELECT SUM(b.available_qty) FROM inv_stock_balance b WHERE b.item_id=i.item_id),0) AS available
        FROM md_item i WHERE i.is_active AND i.is_stockable AND i.reorder_level > 0`);
     const belowMin = [], reorder = [];
     for (const r of low) {
       const avail = num(r.available);
       if (avail > num(r.reorder_level)) continue;                 // healthy
+      // item_id + reorder_qty ride along on the row (not in `columns`, so not rendered) so the UI's
+      // "Create PO" quick-action can pre-fill a draft PO straight from the alert.
       (num(r.min_qty) > 0 && avail <= num(r.min_qty) ? belowMin : reorder).push({
-        item_no: r.item_no, item_name: r.item_name, available: avail,
-        reorder_level: num(r.reorder_level), min_qty: num(r.min_qty), suggest_order: num(r.reorder_qty),
+        item_id: r.item_id, item_no: r.item_no, item_name: r.item_name, available: avail,
+        reorder_level: num(r.reorder_level), min_qty: num(r.min_qty), reorder_qty: num(r.reorder_qty),
+        suggest_order: num(r.reorder_qty),
       });
     }
     const stockCols = [{ k: 'item_no', h: 'Item No' }, { k: 'item_name', h: 'Item' }, { k: 'available', h: 'Available', n: true },

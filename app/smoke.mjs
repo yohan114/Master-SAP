@@ -315,6 +315,23 @@ A('overdue job card flagged (promised 2020-01-01)', grp('overdue-jobs').count >=
 A('pending-pricing group present in the board', al.groups.some((g) => g.key === 'pending-pricing'));
 A('total exception count > 0', al.total > 0, al.total);
 
+console.log('\nREORDER → CREATE-PO QUICK ACTION (alert board → draft PO)');
+const reorderRow = grp('reorder').rows.find((r) => r.item_no === 'SP-0001') || grp('reorder').rows[0] || grp('below-minimum').rows[0];
+A('reorder alert rows carry item_id + reorder_qty for the quick action',
+  !!(reorderRow && reorderRow.item_id && reorderRow.reorder_qty != null), reorderRow);
+const lastSup = await api(`/api/purchase/last-supplier/${reorderRow.item_id}`, admin.cookie);
+A('last-supplier lookup returns 200 (a supplier, or {} when none on file)', lastSup.status === 200, lastSup.body);
+const suggestQty = Math.max(1, Number(reorderRow.reorder_qty) - Number(reorderRow.available));   // reorder_qty − on-hand
+const poQA = await api('/api/purchase/po', keeper.cookie, 'POST',
+  { po_type: 'LOCAL', supplier_id: ids.supplier, location_id: ids.site, lines: [{ item_id: reorderRow.item_id, order_qty: suggestQty }] });
+A('quick-action POST /api/purchase/po creates a DRAFT PO (PO-.., 1 line) for the alert item',
+  poQA.status === 200 && /^PO-/.test(poQA.body.po_no) && poQA.body.doc_status === 'DRAFT' && poQA.body.lines === 1, poQA.body);
+const poQAview = await api(`/api/purchase/po/${poQA.body.po_id}`, admin.cookie);
+A('the draft PO line is the reordered item at the suggested qty',
+  poQAview.body.lines.length === 1 && poQAview.body.lines[0].item_id === reorderRow.item_id && Number(poQAview.body.lines[0].order_qty) === suggestQty, poQAview.body.lines);
+A('quick action is permission-gated: viewer (no STORES.PO) -> 403',
+  (await api('/api/purchase/po', viewer.cookie, 'POST', { po_type: 'LOCAL', supplier_id: ids.supplier, location_id: ids.site, lines: [{ item_id: reorderRow.item_id, order_qty: 1 }] })).status === 403);
+
 console.log('\nOUTSIDE-REPAIR SUB-RESOURCE (POST / GET / DELETE + auto cost roll-up)');
 const jOR = (await api('/api/jobcards', foreman.cookie, 'POST', { asset_id: ids.asset, location_id: ids.site, estimated_cost: 10000 })).body.jobcard_id;
 await api(`/api/jobcards/${jOR}/approve-tm`, admin.cookie, 'POST', {});

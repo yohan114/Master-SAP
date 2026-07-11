@@ -57,6 +57,20 @@ router.get('/po/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// The supplier an item was most recently ordered from — pre-fills the reorder "Create PO"
+// quick-action. Returns {} when the item has never been on a PO (caller falls back to any supplier).
+router.get('/last-supplier/:itemId', async (req, res) => {
+  try {
+    const itemId = Number(req.params.itemId);
+    const row = await one(
+      `SELECT s.supplier_id, s.supplier_name, p.po_no, p.po_date
+       FROM txl_po x JOIN tx_po p ON p.po_id=x.po_id JOIN md_supplier s ON s.supplier_id=p.supplier_id
+       WHERE x.item_id=$1 AND x.is_active AND p.is_active
+       ORDER BY p.po_id DESC LIMIT 1`, [itemId]);
+    res.json(row || {});
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Raise a PO. po_type LOCAL | HEAD_OFFICE. Lines may carry a unit_price now, or leave it blank
 // for price-on-receipt. Optionally raised from an approved MRN (links mrn_id, sets MRN line po_qty).
 router.post('/po', requirePerm('STORES.PO'), async (req, res) => {

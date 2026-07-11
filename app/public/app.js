@@ -145,8 +145,40 @@ async function alertsPanel(v) {
   v.append(head);
   if (!active.length) return;
   active.forEach((g) => {
+    const reorderable = (g.key === 'reorder' || g.key === 'below-minimum') && can('STORES.PO');
     const cols = g.columns.map((c) => ({ h: c.h, k: c.k, n: c.n, r: c.n ? (row) => repNum(row[c.k]) : undefined }));
-    v.append(card(`${g.title}  ·  ${g.count}`, table(cols, g.rows), `<span class="pill ${sev[g.severity] || 'p-idle'}">${esc(g.severity)}</span>`));
+    if (reorderable) cols.push({ h: '', r: (row) => row.item_id ? '<button class="btn sm primary" data-po>Create PO</button>' : '' });
+    const tbl = table(cols, g.rows);
+    v.append(card(`${g.title}  ·  ${g.count}`, tbl, `<span class="pill ${sev[g.severity] || 'p-idle'}">${esc(g.severity)}</span>`));
+    if (reorderable) tbl.querySelectorAll('tbody tr').forEach((tr, i) => {
+      const b = tr.querySelector('[data-po]'); if (b) b.onclick = () => createPoFromAlert(g.rows[i], tr);
+    });
+  });
+}
+// Reorder quick-action: open a pre-filled draft-PO modal from an alert row (item read-only; site,
+// supplier and qty editable). Suggested qty = reorder_qty − on-hand; supplier defaults to the item's
+// last PO supplier. On confirm, POST /api/purchase/po (→ DRAFT) and flip the row to "PO raised".
+async function createPoFromAlert(row, tr) {
+  let last = {}; try { last = await api(`/api/purchase/last-supplier/${row.item_id}`); } catch { /* none on file */ }
+  const suggested = Math.max(1, Number(row.reorder_qty ?? row.suggest_order ?? 0) - Number(row.available ?? 0));
+  formModal(`Create PO — ${row.item_no}`, [
+    { k: 'item', l: 'Item', ro: `${row.item_no} · ${row.item_name}` },
+    { k: 'location_id', l: 'Deliver to (site)', sel: opt(M.locations, 'location_id', 'location_name') },
+    { k: 'supplier_id', l: 'Supplier', sel: opt(M.suppliers || [], 'supplier_id', 'supplier_name') },
+    { k: 'qty', l: 'Order quantity', type: 'number' },
+  ], async (d) => {
+    if (!(Number(d.qty) > 0)) throw new Error('Order quantity must be greater than 0.');
+    const r = await api('/api/purchase/po', { method: 'POST', body: JSON.stringify({
+      po_type: 'LOCAL', supplier_id: d.supplier_id, location_id: d.location_id,
+      lines: [{ item_id: row.item_id, order_qty: Number(d.qty) }],
+    }) });
+    toast(`PO ${r.po_no} raised (draft)`);
+    const cell = tr.querySelector('td:last-child');
+    if (cell) cell.innerHTML = `<span class="pill p-live">PO raised · ${esc(r.po_no)}</span>`;
+  }, (form) => {
+    form.querySelector('[name=location_id]').value = loc0();
+    if (last && last.supplier_id) form.querySelector('[name=supplier_id]').value = last.supplier_id;
+    form.querySelector('[name=qty]').value = suggested;
   });
 }
 
@@ -692,7 +724,9 @@ function pickAsset(title, cb) { formModal(title, [{ k: 'asset_id', l: 'Asset', s
 /* ---------- tiny modal ---------- */
 function formModal(title, fields, onSubmit, afterRender) {
   const body = fields.map((f) => `<label>${esc(f.l)}</label>` +
-    (f.sel !== undefined ? `<select name="${f.k}">${f.sel}</select>` : `<input name="${f.k}" type="${f.type || 'text'}">`)).join('');
+    (f.ro !== undefined ? `<input name="${f.k}" value="${esc(f.ro)}" readonly style="background:var(--panel-2);color:var(--ink-3);cursor:not-allowed">`
+      : f.sel !== undefined ? `<select name="${f.k}">${f.sel}</select>`
+        : `<input name="${f.k}" type="${f.type || 'text'}">`)).join('');
   const ov = h(`<div id="login" style="background:rgba(10,14,20,.55)"><form class="login-card"><div class="brand-row"><h1 style="font-size:16px">${esc(title)}</h1></div>${body}
     <div class="row" style="margin-top:20px"><button class="btn primary" type="submit" style="flex:1">Save</button><button type="button" class="btn" data-x>Cancel</button></div><div class="err"></div></form></div>`);
   document.body.append(ov);
