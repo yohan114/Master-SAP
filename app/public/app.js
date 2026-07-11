@@ -451,7 +451,7 @@ function outsideForm(id) {
     { k: 'subcontractor_id', l: 'Subcontractor', sel: opt(M.suppliers || [], 'supplier_id', 'supplier_name') },
     { k: 'description', l: 'Description' }, { k: 'actual_cost', l: 'Actual cost (LKR)', type: 'number' },
     { k: 'osr_status', l: 'Status', sel: ['SENT', 'IN_PROGRESS', 'RECEIVED', 'INVOICED', 'CLOSED'].map((x) => `<option>${x}</option>`).join('') },
-  ], async (d) => { await api(`/api/jobcards/${id}/outside-repair`, { method: 'POST', body: JSON.stringify(d) }); toast('Outside repair added'); openJob(id); });
+  ], async (d) => { await api(`/api/jobcards/${id}/outside-repairs`, { method: 'POST', body: JSON.stringify(d) }); toast('Outside repair added'); openJob(id); });
 }
 function labourForm(id) {
   formModal('Add labour', [

@@ -87,7 +87,7 @@ A('OM approve -> APPROVED', (await api(`/api/jobcards/${jL}/approve-om`, admin.c
 A('start work -> IN_PROGRESS', (await api(`/api/jobcards/${jL}/start`, foreman.cookie, 'POST', {})).body.jobcard_status === 'IN_PROGRESS');
 const prog = await api(`/api/jobcards/${jL}/progress`, foreman.cookie, 'POST', { work_done: 'Stripped gearbox, inspected bearings', pct_complete: 40, hours_spent: 6 });
 A('daily progress log entry added', !!prog.body.progress_id && prog.body.pct_complete === 40, prog.body);
-const osr = await api(`/api/jobcards/${jL}/outside-repair`, foreman.cookie, 'POST', { subcontractor_id: ids.supplier, description: 'Crankshaft grinding', actual_cost: 15000, osr_status: 'RECEIVED' });
+const osr = await api(`/api/jobcards/${jL}/outside-repairs`, foreman.cookie, 'POST', { subcontractor_id: ids.supplier, description: 'Crankshaft grinding', actual_cost: 15000, osr_status: 'RECEIVED' });
 A('outside/subcontract repair captured (OSR-.., actual 15000)', /^OSR-HQ-\d\d-\d{6}$/.test(osr.body.osr_no) && osr.body.actual_cost === 15000, osr.body);
 await api(`/api/jobcards/${jL}/labour`, foreman.cookie, 'POST', { employee_id: ids.tech, hours: 4 });   // 4*500 = 2000
 A('complete work -> WORK_COMPLETED', (await api(`/api/jobcards/${jL}/complete`, foreman.cookie, 'POST', {})).body.jobcard_status === 'WORK_COMPLETED');
@@ -257,6 +257,19 @@ A('battery warranty flags the expired battery', grp('battery-warranty').rows.som
 A('overdue job card flagged (promised 2020-01-01)', grp('overdue-jobs').count >= 1, grp('overdue-jobs').rows);
 A('pending-pricing group present in the board', al.groups.some((g) => g.key === 'pending-pricing'));
 A('total exception count > 0', al.total > 0, al.total);
+
+console.log('\nOUTSIDE-REPAIR SUB-RESOURCE (POST / GET / DELETE + auto cost roll-up)');
+const jOR = (await api('/api/jobcards', foreman.cookie, 'POST', { asset_id: ids.asset, location_id: ids.site, estimated_cost: 10000 })).body.jobcard_id;
+await api(`/api/jobcards/${jOR}/approve-tm`, admin.cookie, 'POST', {});
+await api(`/api/jobcards/${jOR}/approve-om`, admin.cookie, 'POST', {});
+const orPost = await api(`/api/jobcards/${jOR}/outside-repairs`, foreman.cookie, 'POST', { subcontractor_id: ids.supplier, description: 'Turbo recon', amount: 3000, invoice_ref: 'INV-77' });
+A('POST outside-repairs inserts and re-runs the roll-up (total_job_cost = 3000)',
+  orPost.status === 200 && !!orPost.body.osr_id && orPost.body.total_job_cost === 3000, orPost.body);
+const orList = await api(`/api/jobcards/${jOR}/outside-repairs`, foreman.cookie);
+A('GET outside-repairs lists the entry', orList.body.count === 1 && orList.body.rows[0].osr_id === orPost.body.osr_id && orList.body.rows[0].actual_cost === 3000, orList.body);
+const orDel = await api(`/api/jobcards/${jOR}/outside-repairs/${orPost.body.osr_id}`, foreman.cookie, 'DELETE');
+A('DELETE outside-repairs removes it and re-runs the roll-up (total back to 0)',
+  orDel.body.total_job_cost === 0 && (await api(`/api/jobcards/${jOR}/outside-repairs`, foreman.cookie)).body.count === 0, orDel.body);
 
 await end();
 console.log(`\n${pass} passed, ${fail} failed`);

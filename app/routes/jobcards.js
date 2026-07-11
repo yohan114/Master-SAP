@@ -161,8 +161,27 @@ router.post('/:id/progress', requirePerm('JOB.WRITE'), async (req, res) => {
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-// Outside / subcontract repair — its actual cost is picked up by the cost roll-up.
-router.post('/:id/outside-repair', requirePerm('JOB.OUTSIDE'), async (req, res) => {
+// Outside / subcontract repairs — a job-card sub-resource. NOTE: this app stores these in
+// tx_job_outside_repair (not a "cost_outside_repair" table, which doesn't exist here). Field mapping
+// for the request's names: job_card_id → jobcard_id (URL), vendor → subcontractor_id (a md_supplier
+// reference; there is no free-text vendor_name column), amount → actual_cost, invoice_ref → invoice_no.
+// Every insert/delete re-runs rollupCost so cost_job_summary reflects the new total.
+
+// List all outside-repair entries for a job card.
+router.get('/:id/outside-repairs', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const rows = await q(
+      `SELECT o.osr_id, o.osr_no, o.jobcard_id, o.subcontractor_id, s.supplier_name, o.description,
+              o.actual_cost, o.estimated_cost, o.invoice_no, o.osr_status
+       FROM tx_job_outside_repair o JOIN md_supplier s ON s.supplier_id=o.subcontractor_id
+       WHERE o.jobcard_id=$1 AND o.is_active ORDER BY o.osr_id`, [id]);
+    res.json({ count: rows.length, rows: rows.map((r) => ({ ...r, actual_cost: Number(r.actual_cost) })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Add an outside-repair entry, then re-run the cost roll-up.
+router.post('/:id/outside-repairs', requirePerm('JOB.OUTSIDE'), async (req, res) => {
   try {
     const id = Number(req.params.id);
     const b = req.body || {};
@@ -170,18 +189,43 @@ router.post('/:id/outside-repair', requirePerm('JOB.OUTSIDE'), async (req, res) 
     if (!jc) return res.status(404).json({ error: 'Job card not found' });
     const sub = b.subcontractor_id || (await one('SELECT supplier_id FROM md_supplier WHERE is_active ORDER BY supplier_id LIMIT 1') || {}).supplier_id;
     if (!sub) return res.status(400).json({ error: 'subcontractor_id (a supplier) required' });
+    const amount = money(b.amount ?? b.actual_cost ?? 0);
+    const uid = req.user.user_id;
+    const today = new Date().toISOString().slice(0, 10);
+    const out = await tx(async (c) => {
+      const no = await nextNo('OSR', await siteCodeOf(jc.site_id), today, c);
+      const r = (await c.query(
+        `INSERT INTO tx_job_outside_repair(osr_no, jobcard_id, subcontractor_id, description, invoice_no,
+             sent_date, expected_return_date, estimated_cost, actual_cost, osr_status, doc_status, site_id, created_by)
+         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,'POSTED',$11,$12) RETURNING osr_id, osr_no, actual_cost, osr_status`,
+        [no, id, sub, b.description || null, b.invoice_ref || b.invoice_no || null, today, b.expected_return_date || null,
+         money(b.estimated_cost || 0), amount, b.osr_status || 'SENT', jc.site_id, uid])).rows[0];
+      const cost = await rollupCost(c, id, uid);
+      return { ...r, actual_cost: Number(r.actual_cost), total_job_cost: cost.total_job_cost };
+    });
+    res.json(out);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Remove an outside-repair entry (soft delete), then re-run the cost roll-up. Blocked once the job is
+// finalized — this app has no "OPEN" status; CLOSED/CANCELLED are the terminal states.
+router.delete('/:id/outside-repairs/:osrId', requirePerm('JOB.OUTSIDE'), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const osrId = Number(req.params.osrId);
+    const jc = await one('SELECT jobcard_id, jobcard_status FROM tx_jobcard WHERE jobcard_id=$1 AND is_active', [id]);
+    if (!jc) return res.status(404).json({ error: 'Job card not found' });
+    if (['CLOSED', 'CANCELLED'].includes(jc.jobcard_status))
+      return res.status(409).json({ error: `job is ${jc.jobcard_status}; outside-repair entries can't be removed after it is finalized` });
+    const osr = await one('SELECT osr_id FROM tx_job_outside_repair WHERE osr_id=$1 AND jobcard_id=$2 AND is_active', [osrId, id]);
+    if (!osr) return res.status(404).json({ error: 'Outside-repair entry not found' });
     const uid = req.user.user_id;
     const out = await tx(async (c) => {
-      const no = await nextNo('OSR', await siteCodeOf(jc.site_id), b.sent_date || new Date().toISOString().slice(0, 10), c);
-      const r = await c.query(
-        `INSERT INTO tx_job_outside_repair(osr_no, jobcard_id, subcontractor_id, description, sent_date, expected_return_date,
-             estimated_cost, actual_cost, osr_status, doc_status, site_id, created_by)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,'POSTED',$10,$11) RETURNING osr_id, osr_no, actual_cost, osr_status`,
-        [no, id, sub, b.description || null, b.sent_date || new Date().toISOString().slice(0, 10), b.expected_return_date || null,
-         money(b.estimated_cost || 0), money(b.actual_cost || 0), b.osr_status || 'SENT', jc.site_id, uid]);
-      return r.rows[0];
+      await c.query('UPDATE tx_job_outside_repair SET is_active=FALSE, updated_by=$1, updated_at=now() WHERE osr_id=$2', [uid, osrId]);
+      const cost = await rollupCost(c, id, uid);
+      return { ok: true, removed: osrId, total_job_cost: cost.total_job_cost };
     });
-    res.json({ ...out, actual_cost: Number(out.actual_cost) });
+    res.json(out);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
@@ -245,51 +289,55 @@ router.post('/:id/parts', requirePerm('JOB.PARTS'), async (req, res) => {
 });
 
 // ---- Cost roll-up ---------------------------------------------------------
-// Sum labour + parts (+ outside repair) into cost_job_summary; compute variance; flag provisional.
+// Recompute cost_job_summary from the job's current labour + parts + outside repairs. Runs inside an
+// open transaction client `c`; upserts the summary and the job's total (but NOT its workflow status,
+// so it's safe to call from sub-resource writes). Returns the computed totals.
+async function rollupCost(c, id, uid) {
+  const jc = (await c.query('SELECT estimated_cost, site_id FROM tx_jobcard WHERE jobcard_id=$1 AND is_active', [id])).rows[0];
+  if (!jc) throw new Error('Job card not found');
+  const p = (await c.query(`SELECT
+      COALESCE(SUM(part_cost) FILTER (WHERE NOT is_general AND NOT is_returned),0) AS material,
+      COALESCE(SUM(part_cost) FILTER (WHERE is_general AND NOT is_returned),0) AS general,
+      BOOL_OR(is_provisional) FILTER (WHERE NOT is_returned) AS has_prov
+    FROM tx_job_parts WHERE jobcard_id=$1 AND is_active`, [id])).rows[0];
+  const l = (await c.query('SELECT COALESCE(SUM(labour_cost),0) AS labour FROM tx_job_labour WHERE jobcard_id=$1 AND is_active', [id])).rows[0];
+  const o = (await c.query("SELECT COALESCE(SUM(actual_cost),0) AS outside FROM tx_job_outside_repair WHERE jobcard_id=$1 AND is_active", [id])).rows[0];
+  const material = money(p.material), general = money(p.general), labour = money(l.labour), outside = money(o.outside);
+  const total = money(material + labour + outside + general);
+  const est = money(jc.estimated_cost);
+  const variance = money(total - est);
+  const variance_pct = est > 0 ? Math.round((variance / est) * 10000) / 100 : 0;
+  const isProv = !!p.has_prov;
+  const r = (await c.query(
+    `INSERT INTO cost_job_summary(jobcard_id, material_cost, labour_cost, outside_repair_cost,
+         general_cost, overhead_cost, total_job_cost, estimated_cost, variance_amt, variance_pct,
+         is_provisional, cost_status, calculated_at, site_id, created_by)
+     VALUES($1,$2,$3,$4,$5,0,$6,$7,$8,$9,$10,'CALCULATED', now(), $11,$12)
+     ON CONFLICT (jobcard_id) DO UPDATE SET
+         material_cost=EXCLUDED.material_cost, labour_cost=EXCLUDED.labour_cost,
+         outside_repair_cost=EXCLUDED.outside_repair_cost, general_cost=EXCLUDED.general_cost,
+         total_job_cost=EXCLUDED.total_job_cost, estimated_cost=EXCLUDED.estimated_cost,
+         variance_amt=EXCLUDED.variance_amt, variance_pct=EXCLUDED.variance_pct,
+         is_provisional=EXCLUDED.is_provisional, cost_status='CALCULATED', calculated_at=now(),
+         updated_by=$12, updated_at=now()
+     RETURNING summary_id`,
+    [id, material, labour, outside, general, total, est, variance, variance_pct, isProv, jc.site_id, uid])).rows[0];
+  await c.query('UPDATE tx_jobcard SET total_job_cost=$1, updated_by=$2, updated_at=now() WHERE jobcard_id=$3', [total, uid, id]);
+  return { material_cost: material, labour_cost: labour, outside_repair_cost: outside, general_cost: general,
+    total_job_cost: total, estimated_cost: est, variance_amt: variance, variance_pct, is_provisional: isProv, summary_id: r.summary_id };
+}
+
+// Sum labour + parts (+ outside repair) into cost_job_summary; then flag the job PENDING_CLOSURE.
 router.post('/:id/cost', requirePerm('JOB.COST'), async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const jc = await one('SELECT jobcard_id, site_id, estimated_cost FROM tx_jobcard WHERE jobcard_id=$1 AND is_active', [id]);
-    if (!jc) return res.status(404).json({ error: 'Job card not found' });
     const uid = req.user.user_id;
-
-    const p = await one(`SELECT
-        COALESCE(SUM(part_cost) FILTER (WHERE NOT is_general AND NOT is_returned),0) AS material,
-        COALESCE(SUM(part_cost) FILTER (WHERE is_general AND NOT is_returned),0) AS general,
-        BOOL_OR(is_provisional) FILTER (WHERE NOT is_returned) AS has_prov
-      FROM tx_job_parts WHERE jobcard_id=$1 AND is_active`, [id]);
-    const l = await one('SELECT COALESCE(SUM(labour_cost),0) AS labour FROM tx_job_labour WHERE jobcard_id=$1 AND is_active', [id]);
-    const o = await one("SELECT COALESCE(SUM(actual_cost),0) AS outside FROM tx_job_outside_repair WHERE jobcard_id=$1 AND is_active", [id]);
-
-    const material = money(p.material), general = money(p.general), labour = money(l.labour), outside = money(o.outside);
-    const overhead = 0;
-    const total = money(material + labour + outside + general + overhead);
-    const est = money(jc.estimated_cost);
-    const variance = money(total - est);
-    const variance_pct = est > 0 ? Math.round((variance / est) * 10000) / 100 : 0;
-    const isProv = !!p.has_prov;
-
-    const summary = await tx(async (c) => {
-      const r = await c.query(
-        `INSERT INTO cost_job_summary(jobcard_id, material_cost, labour_cost, outside_repair_cost,
-             general_cost, overhead_cost, total_job_cost, estimated_cost, variance_amt, variance_pct,
-             is_provisional, cost_status, calculated_at, site_id, created_by)
-         VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,'CALCULATED', now(), $12,$13)
-         ON CONFLICT (jobcard_id) DO UPDATE SET
-             material_cost=EXCLUDED.material_cost, labour_cost=EXCLUDED.labour_cost,
-             outside_repair_cost=EXCLUDED.outside_repair_cost, general_cost=EXCLUDED.general_cost,
-             total_job_cost=EXCLUDED.total_job_cost, estimated_cost=EXCLUDED.estimated_cost,
-             variance_amt=EXCLUDED.variance_amt, variance_pct=EXCLUDED.variance_pct,
-             is_provisional=EXCLUDED.is_provisional, cost_status='CALCULATED', calculated_at=now(),
-             updated_by=$13, updated_at=now()
-         RETURNING *`,
-        [id, material, labour, outside, general, overhead, total, est, variance, variance_pct, isProv, jc.site_id, uid]);
-      await c.query("UPDATE tx_jobcard SET total_job_cost=$1, jobcard_status='PENDING_CLOSURE', updated_by=$2, updated_at=now() WHERE jobcard_id=$3", [total, uid, id]);
-      return r.rows[0];
+    const out = await tx(async (c) => {
+      const cost = await rollupCost(c, id, uid);
+      await c.query("UPDATE tx_jobcard SET jobcard_status='PENDING_CLOSURE', updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [uid, id]);
+      return cost;
     });
-    res.json({ material_cost: material, labour_cost: labour, outside_repair_cost: outside,
-      general_cost: general, total_job_cost: total, estimated_cost: est, variance_amt: variance,
-      variance_pct, is_provisional: isProv, summary_id: summary.summary_id });
+    res.json(out);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
