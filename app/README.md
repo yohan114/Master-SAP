@@ -10,10 +10,10 @@ wired together so a stock or oil issue flows straight into a job's final cost.
 - **SQLite** (`DB_ENGINE=sqlite`) — a single local file, zero DB server to run. Schema:
   `sql/schema.sqlite.sql` (generated from the Postgres schema — `node sql/gen-sqlite-schema.js`).
   Great for a laptop trial, a single‑PC install, or matching the legacy SQLite books. The whole
-  suite passes **31/31 on both engines** with the same code (`db.js` translates the handful of
+  suite passes **37/37 on both engines** with the same code (`db.js` translates the handful of
   Postgres‑isms and picks the engine from `DB_ENGINE` / `SQLITE_DB`).
 
-## What works (verified end‑to‑end — `npm run smoke`, 31/31)
+## What works (verified end‑to‑end — `npm run smoke`, 37/37)
 
 **One‑system integration (the point):** receive parts into stores → moving‑average cost rolls forward
 (10@1500 + 10@1700 → **1,600**) → issue to a workshop job → the issue **auto‑posts as a job part** →
@@ -25,6 +25,14 @@ by the live stock balance. All in one app.
 - **Issue** — checks the live balance, values at MWAC, posts an `OUT` movement + issue document, and —
   when `jobcard_id` is given — **creates the job part**, so stores and workshop are one flow.
 - **Stock / items** — on‑hand, moving‑avg cost, and stock value per item‑location (site‑scoped).
+
+### Requisitions — MRN module (`routes/mrn.js`)
+- **Raise → approve → fulfil.** A Material Requisition Note is the demand document that precedes an
+  issue: raise it (DRAFT) with request lines, approve it (sets approved qty), then **fulfil from stock**,
+  which posts the issue at MWAC against the MRN, increments `issued_qty`, and rolls the line/header to
+  `PARTIAL` / `CLOSED`. Stock short of the approved qty is left open for a later top‑up.
+- **Same engine, same flow.** Fulfilment reuses the shared issue engine, so an MRN raised against a job
+  card posts its parts straight onto that job — one flow, no re‑keying.
 
 ### Oil / Lubricant module (`routes/oil.js`)
 - **Receive / issue** on the same engine — an oil issue requires a **vehicle/machine** (`asset_id`) and
@@ -59,6 +67,7 @@ by the live stock balance. All in one app.
 | `routes/auth.js` | login / logout |
 | `lib/inventory.js` | shared inventory engine — receive/issue/count over one MWAC ledger (stores + oil) |
 | `routes/stores.js` | the Stores module (receive/GRN · issue · MWAC ledger · issue→job link) |
+| `routes/mrn.js` | the Requisitions module (MRN raise · approve · fulfil‑from‑stock → issue) |
 | `routes/oil.js` | the Oil/Lubricant module (receive · issue‑to‑vehicle · consumption · stock count) |
 | `routes/battery.js` | the Battery module (serial lifecycle · event history) |
 | `routes/jobcards.js` | the Workshop module (jobs · labour · parts · cost · close) |
@@ -68,9 +77,10 @@ by the live stock balance. All in one app.
 
 ## The web UI
 A single-page UI is served by the same app at `/` (see `public/`): login → dashboard (live KPIs) →
-Stores · Oil · Battery · Workshop. It drives the same APIs — browse the real catalog, receive/issue
-stock, register/install batteries and view their history, and run the full job‑costing flow
-(create → labour → issue parts → compute → close). No build step; vanilla JS, theme‑aware.
+Stores · Requisitions · Oil · Battery · Workshop. It drives the same APIs — browse the real catalog,
+receive/issue stock, raise/approve/fulfil requisitions, register/install batteries and view their
+history, and run the full job‑costing flow (create → labour → issue parts → compute → close). No build
+step; vanilla JS, theme‑aware.
 
 ## Load your real data
 `migrate-legacy.js` reads the two legacy SQLite books and loads the real masters (items, oil products,
@@ -90,7 +100,7 @@ export DB_ENGINE=sqlite SQLITE_DB=./umms.sqlite   # one local file
 node init-db.js       # loads sql/schema.sqlite.sql into a fresh file
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 31/31  (start the server first, in another shell)
+npm run smoke         # 37/37  (start the server first, in another shell)
 ```
 
 ### Option B — PostgreSQL
@@ -102,7 +112,7 @@ cd app && npm install
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=umms   # PG* env, no secrets in code
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 31/31
+npm run smoke         # 37/37
 ```
 
 The same `migrate-legacy.js` / `backfill-opening.js` work under either engine (prefix `DB_ENGINE=sqlite`

@@ -60,8 +60,9 @@ async function postReceive(c, { itemId, locationId, qty, unitCost = 0, date, sit
   return { ledger_id: led.ledger_id, grn_id: grn.grn_id, on_hand_qty: newQty, moving_avg_cost: newAvg, stock_value: newVal };
 }
 
-// Issue stock at MWAC; optionally straight onto a job card (unifies stores/oil with workshop).
-async function postIssue(c, { itemId, locationId, qty, jobcardId = null, assetId = null, date, siteId, userId }) {
+// Issue stock at MWAC; optionally straight onto a job card (unifies stores/oil with workshop)
+// and/or against an MRN (mrnId links the issue back to the requisition).
+async function postIssue(c, { itemId, locationId, qty, jobcardId = null, assetId = null, mrnId = null, date, siteId, userId }) {
   if (!(qty > 0)) throw new Error('qty must be > 0');
   const bal = await balanceOf(c, itemId, locationId);
   if (bal._new || Number(bal.on_hand_qty) < qty)
@@ -74,9 +75,9 @@ async function postIssue(c, { itemId, locationId, qty, jobcardId = null, assetId
   const scode = await siteCodeOf(c, siteId);
 
   const iss = (await c.query(
-    `INSERT INTO tx_issue(issue_no, issue_date, location_id, issue_type, asset_id, jobcard_id, total_amt, doc_status, site_id, created_by)
-     VALUES($1,$2,$3,$4,$5,$6,$7,'POSTED',$8,$9) RETURNING issue_id`,
-    [await nextNo('ISS', scode, date, c), date, locationId, jobcardId ? 'JOB' : 'STORE', assetId, jobcardId, lineAmt, siteId, userId])).rows[0];
+    `INSERT INTO tx_issue(issue_no, issue_date, location_id, issue_type, asset_id, jobcard_id, mrn_id, total_amt, doc_status, site_id, created_by)
+     VALUES($1,$2,$3,$4,$5,$6,$7,$8,'POSTED',$9,$10) RETURNING issue_id`,
+    [await nextNo('ISS', scode, date, c), date, locationId, jobcardId ? 'JOB' : 'STORE', assetId, jobcardId, mrnId, lineAmt, siteId, userId])).rows[0];
   const led = (await c.query(
     `INSERT INTO mv_stock_ledger(movement_no, movement_date, item_id, location_id, mv_direction, qty, unit_cost, value_amt,
          running_balance_qty, running_balance_value, running_avg_cost, source_doc_type, source_doc_id, posted_by, posted_at, site_id, created_by)

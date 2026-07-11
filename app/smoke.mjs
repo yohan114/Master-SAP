@@ -121,6 +121,24 @@ A('full history preserved: RECEIVED→INSTALLED→TRANSFERRED→RETURNED→SCRAP
 A('original vs current asset both preserved (original=truck, current=null after scrap)',
   Number(hist.body.original_asset_id) === Number(ids.asset) && hist.body.current_asset_id === null, { o: hist.body.original_asset_id, c: hist.body.current_asset_id });
 
+console.log('\nMRN (requisition → approve → fulfil from stock)');
+// spare stands at 17 on hand @ 1600 at HQ from the stores section above
+A('viewer CANNOT raise an MRN -> 403',
+  (await api('/api/mrn', viewer.cookie, 'POST', { location_id: ids.site, lines: [{ item_id: ids.spare, qty: 5 }] })).status === 403);
+const mrnRaise = await api('/api/mrn', foreman.cookie, 'POST', { location_id: ids.site, lines: [{ item_id: ids.spare, qty: 5 }] });
+A('raise MRN -> MRN-HQ-.. DRAFT, 1 line',
+  mrnRaise.status === 200 && /^MRN-HQ-\d\d-\d{6}$/.test(mrnRaise.body.mrn_no) && mrnRaise.body.doc_status === 'DRAFT' && mrnRaise.body.lines === 1, mrnRaise.body);
+const mrnId = mrnRaise.body.mrn_id;
+A('cannot fulfil before approve -> 409', (await api(`/api/mrn/${mrnId}/fulfil`, foreman.cookie, 'POST', {})).status === 409);
+const appr = await api(`/api/mrn/${mrnId}/approve`, foreman.cookie, 'POST', {});
+A('approve -> APPROVED', appr.body.doc_status === 'APPROVED', appr.body);
+const ful = await api(`/api/mrn/${mrnId}/fulfil`, foreman.cookie, 'POST', {});
+A('fulfil -> CLOSED, line issued 5 at MWAC',
+  ful.body.doc_status === 'CLOSED' && ful.body.lines[0].issued === 5 && ful.body.lines[0].line_amt === 8000 && ful.body.lines[0].line_status === 'CLOSED', ful.body);
+const mrnGot = await api(`/api/mrn/${mrnId}`, admin.cookie);
+A('MRN line shows issued 5; the fulfilling issue dropped stock 17 -> 12',
+  Number(mrnGot.body.lines[0].issued_qty) === 5 && Number(mrnGot.body.lines[0].on_hand_qty) === 12, mrnGot.body.lines?.[0]);
+
 await end();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

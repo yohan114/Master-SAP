@@ -28,6 +28,7 @@ app.get('/api/summary', async (req, res) => {
       (SELECT count(*) FROM md_battery WHERE battery_status='IN_SERVICE') batteries_in_service,
       (SELECT count(*) FROM tx_jobcard WHERE is_active) jobs,
       (SELECT count(*) FROM tx_jobcard WHERE is_active AND jobcard_status NOT IN ('CLOSED','CANCELLED')) jobs_open,
+      (SELECT count(*) FROM tx_mrn WHERE is_active AND doc_status NOT IN ('CLOSED','CANCELLED')) mrns_open,
       (SELECT COALESCE(SUM(stock_value),0) FROM inv_stock_balance) stock_value,
       (SELECT COALESCE(SUM(total_job_cost),0) FROM cost_job_summary WHERE cost_status='FINALIZED') jobs_costed_value`))[0];
     res.json(s);
@@ -46,6 +47,7 @@ app.use('/api/jobcards', require('./routes/jobcards'));
 app.use('/api/stores', require('./routes/stores'));
 app.use('/api/oil', require('./routes/oil'));
 app.use('/api/battery', require('./routes/battery'));
+app.use('/api/mrn', require('./routes/mrn'));
 
 const PORT = process.env.PORT || 4000;
 async function start() {

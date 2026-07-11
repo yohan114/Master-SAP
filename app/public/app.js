@@ -41,9 +41,9 @@ $('#loginForm').addEventListener('submit', async (e) => {
 $('#logout').addEventListener('click', async () => { await api('/auth/logout', { method: 'POST' }); location.reload(); });
 $('#nav').addEventListener('click', (e) => { const a = e.target.closest('a[data-view]'); if (a) route(a.dataset.view); });
 
-const VIEWS = { dashboard, stores, oil, battery, workshop };
-const CRUMB = { dashboard: 'Overview', stores: 'Inventory', oil: 'Lubricant book', battery: 'Serial lifecycle', workshop: 'Job costing' };
-const TITLE = { dashboard: 'Dashboard', stores: 'Stores', oil: 'Oil & Lubricant', battery: 'Battery', workshop: 'Workshop' };
+const VIEWS = { dashboard, stores, mrn, oil, battery, workshop };
+const CRUMB = { dashboard: 'Overview', stores: 'Inventory', mrn: 'Requisitions', oil: 'Lubricant book', battery: 'Serial lifecycle', workshop: 'Job costing' };
+const TITLE = { dashboard: 'Dashboard', stores: 'Stores', mrn: 'Requisitions (MRN)', oil: 'Oil & Lubricant', battery: 'Battery', workshop: 'Workshop' };
 async function route(v) {
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === v));
   $('#crumb').textContent = CRUMB[v]; $('#title').textContent = TITLE[v]; $('#topActions').innerHTML = '';
@@ -70,7 +70,8 @@ async function dashboard() {
   const kpis = [
     ['Stores items', int(s.stores_items)], ['Oil products', int(s.oil_products)],
     ['Fleet assets', int(s.assets)], ['Batteries', `${int(s.batteries)} <small>/ ${int(s.batteries_in_service)} fitted</small>`],
-    ['Open jobs', int(s.jobs_open)], ['Stock value', `<small>LKR</small> ${money(s.stock_value)}`],
+    ['Open MRNs', int(s.mrns_open)], ['Open jobs', int(s.jobs_open)],
+    ['Stock value', `<small>LKR</small> ${money(s.stock_value)}`],
   ];
   const v = $('#view'); v.innerHTML = '';
   v.append(h(`<div class="kpis">${kpis.map((k) => `<div class="kpi"><div class="v">${k[1]}</div><div class="l">${k[0]}</div></div>`).join('')}</div>`));
@@ -101,6 +102,74 @@ async function stores() {
   v.append(card(`Item master (showing ${items.length})`, table([
     { h: 'Item No', k: 'item_no' }, { h: 'Item', k: 'item_name' }, { h: 'Type', k: 'item_type' },
   ], items)));
+}
+
+/* ---------- requisitions (MRN) ---------- */
+async function mrn() {
+  const v = $('#view'); v.innerHTML = '';
+  const rows = (await api('/api/mrn')).rows;
+  if (can('STORES.MRN')) $('#topActions').append(btn('+ New requisition', newMrnForm));
+  v.append(card(`Requisitions (${rows.length})`, table([
+    { h: 'MRN No', k: 'mrn_no' }, { h: 'Date', k: 'mrn_date' },
+    { h: 'Requesting store', k: 'location_name' }, { h: 'Lines', n: true, k: 'lines' },
+    { h: 'Status', r: (r) => statusPill(r.doc_status) },
+  ], rows, { click: (r) => openMrn(r.mrn_id) })));
+}
+async function newMrnForm() {
+  const items = (await api('/api/stores/items')).rows;
+  const jobs = (await api('/api/jobcards')).rows;
+  const itemOpts = `<option value="">— item —</option>` + opt(items, 'item_id', 'item_name');
+  const lineRow = () => `<div class="row mrn-line" style="gap:8px;margin-bottom:8px">
+      <select name="item" style="flex:3">${itemOpts}</select>
+      <input name="qty" type="number" placeholder="Qty" style="flex:1" min="0" step="any">
+      <button type="button" class="btn" data-del>✕</button></div>`;
+  const ov = h(`<div id="login" style="background:rgba(10,14,20,.55)"><form class="login-card" style="max-width:560px">
+    <div class="brand-row"><h1 style="font-size:16px">New requisition (MRN)</h1></div>
+    <label>Requesting store</label><select name="location_id">${opt(M.locations, 'location_id', 'location_name')}</select>
+    <label>Against job card (optional)</label><select name="jobcard_id"><option value="">— none —</option>${opt(jobs, 'jobcard_id', 'jobcard_no')}</select>
+    <label>Items requested</label><div id="mrnLines">${lineRow()}${lineRow()}</div>
+    <button type="button" class="btn sm" data-add>+ add line</button>
+    <div class="row" style="margin-top:20px"><button class="btn primary" type="submit" style="flex:1">Raise MRN</button><button type="button" class="btn" data-x>Cancel</button></div>
+    <div class="err"></div></form></div>`);
+  document.body.append(ov);
+  const form = ov.querySelector('form'); const lines = ov.querySelector('#mrnLines');
+  ov.querySelector('[data-x]').onclick = () => ov.remove();
+  ov.querySelector('[data-add]').onclick = () => lines.append(h(lineRow()));
+  lines.addEventListener('click', (e) => { const d = e.target.closest('[data-del]'); if (d && lines.children.length > 1) d.closest('.mrn-line').remove(); });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = {
+      location_id: form.querySelector('[name=location_id]').value,
+      jobcard_id: form.querySelector('[name=jobcard_id]').value || null,
+      lines: [...lines.querySelectorAll('.mrn-line')].map((r) => ({
+        item_id: r.querySelector('[name=item]').value, qty: Number(r.querySelector('[name=qty]').value),
+      })).filter((x) => x.item_id && x.qty > 0),
+    };
+    if (!body.lines.length) { form.querySelector('.err').textContent = 'Add at least one item with a quantity.'; return; }
+    try { const r = await api('/api/mrn', { method: 'POST', body: JSON.stringify(body) }); ov.remove(); toast('MRN ' + r.mrn_no + ' raised'); openMrn(r.mrn_id); }
+    catch (err) { form.querySelector('.err').textContent = err.message; }
+  });
+}
+async function openMrn(id) {
+  const m = await api('/api/mrn/' + id);
+  const v = $('#view'); v.innerHTML = ''; v.append(backBtn('mrn'));
+  const bar = h('<div class="row" style="margin-bottom:18px"></div>');
+  if (can('STORES.MRN') && m.doc_status === 'DRAFT')
+    bar.append(btnP('Approve', async () => { try { await api(`/api/mrn/${id}/approve`, { method: 'POST', body: '{}' }); toast('MRN approved'); openMrn(id); } catch (e) { toast(e.message, true); } }));
+  if (can('STORES.ISSUE') && ['APPROVED', 'PARTIAL'].includes(m.doc_status))
+    bar.append(btnP('Fulfil from stock', async () => { try { const r = await api(`/api/mrn/${id}/fulfil`, { method: 'POST', body: '{}' }); toast('Fulfilled → ' + r.doc_status.toLowerCase()); openMrn(id); } catch (e) { toast(e.message, true); } }));
+  const info = h(`<div class="row" style="margin-bottom:6px">
+    <div><div class="crumb">Requesting store</div><b>${esc(m.location_name)}</b></div>
+    <div><div class="crumb">Status</div>${statusPill(m.doc_status)}</div>
+    <div><div class="crumb">Job card</div><b>${m.jobcard_id ? '#' + esc(m.jobcard_id) : '—'}</b></div></div>`);
+  const wrap = document.createElement('div'); wrap.append(info, bar);
+  v.append(card(esc(m.mrn_no), wrap));
+  v.append(card('Lines', table([
+    { h: 'Item', r: (r) => esc(`${r.item_no} · ${r.item_name}`) },
+    { h: 'Requested', n: true, r: (r) => int(r.requested_qty) }, { h: 'Approved', n: true, r: (r) => int(r.approved_qty) },
+    { h: 'Issued', n: true, r: (r) => int(r.issued_qty) }, { h: 'On hand', n: true, r: (r) => int(r.on_hand_qty) },
+    { h: 'Line', r: (r) => statusPill(r.line_status) },
+  ], m.lines)));
 }
 
 /* ---------- oil ---------- */
