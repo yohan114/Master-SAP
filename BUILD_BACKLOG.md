@@ -43,7 +43,7 @@ The backend is live in `app/` on the real schema (verified `npm run smoke`, 12/1
 - [ ] 🟡 Job cost reports / export
 
 ## Tier 3 — Unify into one UMMS platform  🔴 (months) — **foundation STARTED**
-The blueprint + **validated 76‑table PostgreSQL schema** + **tested ETLs** exist; the app is now begun
+The blueprint + **validated 77‑table PostgreSQL schema** + **tested ETLs** exist; the app is now begun
 (`app/` runs on PostgreSQL with shared auth/RBAC/site‑scope/numbering + the Workshop module).
 - [x] 🔴 Build the app on `sql/schema.sql` — **all four domain backends + a unified web UI + a deploy
   kit done** (Stores · Oil · Battery · Workshop in one login/DB/engine, 31/31; SPA at `/` on real data;

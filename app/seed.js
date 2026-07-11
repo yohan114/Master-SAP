@@ -69,6 +69,12 @@ const USERS = [
       await run('INSERT INTO sec_user_role(user_id, role_id, created_by) VALUES($1,$2,$3) ON CONFLICT (user_id, role_id) DO NOTHING', [uid, rid, CB]);
     }
 
+    // 3b) a demo service account for the /api/v1 REST layer (client-credentials -> Bearer JWT)
+    await run(`INSERT INTO sec_service_account(client_id, client_secret_hash, account_name, scopes, created_by)
+               VALUES('sap-fiori',$1,'SAP Fiori / Integration Suite','read',$2)
+               ON CONFLICT (client_id) DO UPDATE SET client_secret_hash=EXCLUDED.client_secret_hash`,
+             [hashPassword('ChangeMe@Svc1'), CB]);
+
     // 4) masters: site, uom, item category + item, asset, grade + labour rate + technician
     const site = (await run(`INSERT INTO md_location(location_code, location_name, location_type, site_code, created_by)
       VALUES('HQ','Head Office Workshop','SITE','HQ',$1)

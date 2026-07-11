@@ -189,6 +189,25 @@ CREATE TABLE sec_audit_log (
 CREATE INDEX ix_sec_audit_log_user ON sec_audit_log(user_id, attempted_at);
 CREATE INDEX ix_sec_audit_log_at ON sec_audit_log(audit_id);
 
+-- Machine-to-machine credentials for the /api/v1 REST layer (SAP Fiori / Integration Suite, etc.).
+-- POST /api/v1/auth/token exchanges client_id + client_secret for a short-lived Bearer JWT. The secret
+-- is stored hashed (scrypt), like a user password.
+CREATE TABLE sec_service_account (
+    service_account_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    client_id          VARCHAR(60)  NOT NULL,
+    client_secret_hash VARCHAR(200) NOT NULL,
+    account_name       VARCHAR(150) NOT NULL,
+    scopes             VARCHAR(300) NOT NULL DEFAULT 'read',
+    last_token_at      TIMESTAMPTZ,
+    created_by BIGINT      NOT NULL REFERENCES sec_user(user_id),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_by BIGINT      REFERENCES sec_user(user_id),
+    updated_at TIMESTAMPTZ,
+    row_version INTEGER    NOT NULL DEFAULT 1,
+    is_active  BOOLEAN     NOT NULL DEFAULT TRUE,
+    CONSTRAINT uq_sec_service_account_client UNIQUE (client_id)
+);
+
 CREATE TABLE sys_number_series (
     series_id     BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     doc_type      VARCHAR(5)  NOT NULL,   -- MRN|PO|GRN|ISS|TRF|ADJ|RET|LUB|BAT|BTR|BRT|JC|MRQ|LAB|OSR

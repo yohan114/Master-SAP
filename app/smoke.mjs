@@ -379,6 +379,37 @@ A('the duplicate’s stock balance was folded into keep (0 balance rows left)',
   Number((await q('SELECT COUNT(*) AS n FROM inv_stock_balance WHERE item_id=$1', [dupId]))[0].n) === 0);
 A('merge-items is admin-only (foreman -> 403)', (await api('/api/admin/merge-items', foreman.cookie, 'POST', { keepId: ids.spare, mergeId: dupId })).status === 403);
 
+console.log('\nREST API v1 (service-account JWT + read endpoints + OpenAPI)');
+const apiv1 = async (path, token, method = 'GET', bodyObj) => {
+  const headers = { 'content-type': 'application/json' };
+  if (token) headers.authorization = 'Bearer ' + token;
+  const r = await fetch(`${BASE}${path}`, { method, headers, body: bodyObj ? JSON.stringify(bodyObj) : undefined });
+  return { status: r.status, body: await r.json().catch(() => ({})) };
+};
+A('token endpoint rejects a bad client secret -> 401', (await apiv1('/api/v1/auth/token', null, 'POST', { client_id: 'sap-fiori', client_secret: 'wrong' })).status === 401);
+const tok = await apiv1('/api/v1/auth/token', null, 'POST', { client_id: 'sap-fiori', client_secret: 'ChangeMe@Svc1' });
+A('token endpoint issues a Bearer JWT valid 8h', tok.status === 200 && !!tok.body.access_token && tok.body.token_type === 'Bearer' && tok.body.expires_in === 28800, tok.body);
+const T = tok.body.access_token;
+A('data endpoints reject a missing token -> 401', (await apiv1('/api/v1/items', null)).status === 401);
+A('data endpoints reject a garbage token -> 401', (await apiv1('/api/v1/items', 'not.a.jwt')).status === 401);
+const v1items = await apiv1('/api/v1/items', T);
+A('GET /items returns the item master with stock joined',
+  v1items.status === 200 && Array.isArray(v1items.body.items) && v1items.body.items.some((x) => x.item_code === 'SP-0001' && typeof x.qty_on_hand === 'number'), v1items.body?.count);
+const v1search = await apiv1('/api/v1/items?search=brake', T);
+A('GET /items?search filters by code/name', v1search.body.items.length >= 1 && v1search.body.items.every((x) => /brake/i.test(x.item_name)) && v1search.body.items.some((x) => x.item_code === 'SP-0001'), v1search.body);
+const v1sb = await apiv1('/api/v1/stock-balance?item_code=SP-0001', T);
+A('GET /stock-balance returns qty_on_hand + unit_cost',
+  v1sb.status === 200 && v1sb.body.balances.length >= 1 && v1sb.body.balances.every((x) => x.item_code === 'SP-0001') && typeof v1sb.body.balances[0].unit_cost === 'number', v1sb.body);
+const v1jc = await apiv1('/api/v1/jobcards', T);
+A('GET /jobcards returns jobs with a cost summary', v1jc.status === 200 && v1jc.body.jobcards.length >= 1 && v1jc.body.jobcards.some((j) => j.cost_summary && j.total_job_cost > 0), v1jc.body?.count);
+const v1grn = await apiv1('/api/v1/grns', T);
+A('GET /grns returns receipts with line items', v1grn.status === 200 && v1grn.body.grns.length >= 1 && v1grn.body.grns.some((g) => Array.isArray(g.lines) && g.lines.length >= 1), v1grn.body?.count);
+const v1as = await apiv1('/api/v1/assets', T);
+A('GET /assets returns the fleet master (VEH-0001, with current_battery field)', v1as.status === 200 && v1as.body.assets.some((a) => a.asset_no === 'VEH-0001' && 'current_battery' in a), v1as.body?.count);
+const v1oas = await apiv1('/api/v1/openapi.json', null);
+A('GET /openapi.json publishes an OpenAPI 3.0 doc covering the endpoints',
+  v1oas.status === 200 && /^3\.0/.test(v1oas.body.openapi || '') && !!v1oas.body.paths['/items'] && !!v1oas.body.paths['/auth/token'] && !!v1oas.body.components.securitySchemes.bearerAuth, Object.keys(v1oas.body.paths || {}));
+
 console.log('\nSECURITY — force password change + login audit + lockout');
 A('login flags must_change_password for a seeded (default-password) account', admin.body.must_change_password === true, admin.body);
 // change-password validation + rotation (on viewer; not used after this)

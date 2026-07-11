@@ -13,7 +13,8 @@ app.use(express.json());
 app.use(cookieParser());
 
 app.get('/health', (_req, res) => res.json({ ok: true, service: 'umms-app' }));
-app.use('/auth', require('./routes/auth'));      // public
+app.use('/auth', require('./routes/auth'));      // public (cookie-session login)
+app.use('/api/v1', require('./routes/apiv1'));   // public REST API — Bearer-JWT auth, before the session gate
 app.use(express.static(path.join(__dirname, 'public'))); // the unified web UI
 
 app.use('/api', authMiddleware);                 // everything below requires a session

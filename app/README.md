@@ -1,6 +1,6 @@
 # UMMS app — one unified system (PostgreSQL **or** SQLite)
 
-**One system, one login, one database** on the validated 76‑table schema — not separate apps. Shared
+**One system, one login, one database** on the validated 77‑table schema — not separate apps. Shared
 foundation (auth, RBAC, site‑scope, numbering) and a **single inventory engine** (`lib/inventory.js`)
 under all four domains: **Stores**, **Oil/Lubricant**, **Battery**, and **Workshop Job‑Card + Costing** —
 wired together so a stock or oil issue flows straight into a job's final cost.
@@ -10,10 +10,10 @@ wired together so a stock or oil issue flows straight into a job's final cost.
 - **SQLite** (`DB_ENGINE=sqlite`) — a single local file, zero DB server to run. Schema:
   `sql/schema.sqlite.sql` (generated from the Postgres schema — `node sql/gen-sqlite-schema.js`).
   Great for a laptop trial, a single‑PC install, or matching the legacy SQLite books. The whole
-  suite passes **134/134 on both engines** with the same code (`db.js` translates the handful of
+  suite passes **145/145 on both engines** with the same code (`db.js` translates the handful of
   Postgres‑isms and picks the engine from `DB_ENGINE` / `SQLITE_DB`).
 
-## What works (verified end‑to‑end — `npm run smoke`, 134/134)
+## What works (verified end‑to‑end — `npm run smoke`, 145/145)
 
 **One‑system integration (the point):** receive parts into stores → moving‑average cost rolls forward
 (10@1500 + 10@1700 → **1,600**) → issue to a workshop job → the issue **auto‑posts as a job part** →
@@ -132,6 +132,25 @@ by the live stock balance. All in one app.
   logins return **HTTP 429** until it lapses. **`GET /api/admin/login-audit`** is a paginated attempt
   history (admin-only), surfaced as a *Recent login attempts* card on the Admin page.
 
+### Versioned REST API for external systems (`routes/apiv1.js`, `auth/jwt.js`)
+A public, **Bearer-authenticated** `/api/v1` namespace for SAP Fiori / Integration Suite and other HTTP
+consumers — mounted *before* the cookie-session gate, so it never touches the web-app session auth.
+- **`POST /api/v1/auth/token`** — client-credentials flow: a `client_id` + `client_secret` from the new
+  `sec_service_account` table (secret stored scrypt-hashed) is exchanged for an **8-hour HS256 JWT**
+  (`{ access_token, token_type: "Bearer", expires_in: 28800 }`). The JWT is signed/verified with Node
+  `crypto` — **no external dependency**; the signing key is `API_JWT_SECRET` (set it in production).
+- **Read endpoints** (all require `Authorization: Bearer <jwt>`):
+  `GET /items?site=&category=&search=` (item master + current stock),
+  `GET /stock-balance?site=&item_code=` (on-hand qty + unit cost per item/location),
+  `GET /jobcards?status=&asset=&from=&to=` (job cards + cost summary),
+  `GET /grns?from=&to=&supplier=` (goods-receipt notes with nested line items),
+  `GET /assets` (fleet master + currently-installed battery).
+- **`GET /api/v1/openapi.json`** — an OpenAPI 3.0 document (with the `bearerAuth` security scheme) so the
+  surface is auto-discoverable by SAP Integration Suite / any HTTP adapter.
+- Every query is parameterized and **engine-agnostic** (case-insensitive search via `LOWER(col) LIKE`,
+  no `ILIKE`), so the API behaves identically on PostgreSQL and SQLite. Seeded service account for a
+  local trial: `sap-fiori` / `ChangeMe@Svc1`.
+
 ## Files
 | Path | Purpose |
 |---|---|
@@ -187,7 +206,7 @@ export DB_ENGINE=sqlite SQLITE_DB=./umms.sqlite   # one local file
 node init-db.js       # loads sql/schema.sqlite.sql into a fresh file
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 134/134  (start the server first, in another shell)
+npm run smoke         # 145/145  (start the server first, in another shell)
 ```
 
 ### Option B — PostgreSQL
@@ -199,7 +218,7 @@ cd app && npm install
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=umms   # PG* env, no secrets in code
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 134/134
+npm run smoke         # 145/145
 ```
 
 The same `migrate-legacy.js` / `backfill-opening.js` work under either engine (prefix `DB_ENGINE=sqlite`
