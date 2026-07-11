@@ -14,6 +14,16 @@ async function siteCodeOf(locationId) {
   return (r && (r.site_code || r.location_code || 'HQ')).trim().slice(0, 3).toUpperCase();
 }
 
+// Append one row to the job-card status-transition audit trail (hist_jobcard_status). Runs inside an
+// open transaction client `c`, in the same commit as the UPDATE that changes the status, so the
+// history can never drift from the record. `from` is NULL for the opening transition.
+async function logStatus(c, jobcardId, from, to, siteId, uid, note = null) {
+  await c.query(
+    `INSERT INTO hist_jobcard_status(jobcard_id, from_status, to_status, note, changed_by, site_id)
+     VALUES($1,$2,$3,$4,$5,$6)`,
+    [jobcardId, from, to, note, uid, siteId]);
+}
+
 // ---- Job cards ------------------------------------------------------------
 
 // List (site-scoped).
@@ -48,10 +58,36 @@ router.post('/', requirePerm('JOB.WRITE'), async (req, res) => {
          VALUES($1,$2,$3,$4,$5,$6,$7,$8,'PENDING_TM_APPROVAL', now(), $9,$10)
          RETURNING jobcard_id, jobcard_no, jobcard_status`,
         [no, jobcard_date, asset_id, location_id, job_type, reported_defect, promised_date, money(estimated_cost), site_id, uid]);
+      await logStatus(c, r.rows[0].jobcard_id, null, 'PENDING_TM_APPROVAL', site_id, uid, 'raised / submitted for approval');
       return r.rows[0];
     });
     res.json(out);
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// Job cards awaiting THIS user's action, by what their permissions let them do next in the
+// two-level approval workflow — feeds the dashboard "pending my action" alert. TM approvers see
+// jobs at PENDING_TM_APPROVAL, OM approvers at PENDING_OM_APPROVAL, closers at PENDING_CLOSURE.
+// Site-scoped like every other read. Declared before '/:id' so the literal path wins the match.
+router.get('/pending-my-action', async (req, res) => {
+  try {
+    const may = (p) => req.perms.has(p) || req.perms.has('ADMIN.ALL');
+    const actionByStatus = {};
+    if (may('JOB.APPROVE_TM')) actionByStatus.PENDING_TM_APPROVAL = 'TM approval';
+    if (may('JOB.APPROVE_OM')) actionByStatus.PENDING_OM_APPROVAL = 'OM approval';
+    if (may('JOB.CLOSE')) actionByStatus.PENDING_CLOSURE = 'Close';
+    const statuses = Object.keys(actionByStatus);
+    if (!statuses.length) return res.json({ count: 0, rows: [] });
+    const ph = statuses.map((_, i) => `$${i + 1}`).join(',');
+    const sc = scopeSql(req, 'jc', statuses.length + 1);
+    const rows = await q(
+      `SELECT jc.jobcard_id, jc.jobcard_no, jc.jobcard_date, jc.job_type, jc.jobcard_status,
+              jc.asset_id, a.asset_no, a.asset_name, jc.estimated_cost, jc.total_job_cost, jc.site_id
+       FROM tx_jobcard jc JOIN md_asset a ON a.asset_id = jc.asset_id
+       WHERE jc.is_active AND jc.jobcard_status IN (${ph})${sc.sql}
+       ORDER BY jc.jobcard_id DESC LIMIT 200`, [...statuses, ...sc.params]);
+    res.json({ count: rows.length, rows: rows.map((r) => ({ ...r, action: actionByStatus[r.jobcard_status] })) });
+  } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // Get one with lines + current cost.
@@ -80,6 +116,10 @@ router.get('/:id', async (req, res) => {
               o.invoice_no, o.estimated_cost, o.actual_cost, o.osr_status
        FROM tx_job_outside_repair o JOIN md_supplier s ON s.supplier_id=o.subcontractor_id
        WHERE o.jobcard_id=$1 AND o.is_active ORDER BY o.osr_id`, [id]);
+    jc.status_history = await q(`SELECT h.jc_status_hist_id, h.from_status, h.to_status, h.note, h.changed_at,
+              u.username AS changed_by
+       FROM hist_jobcard_status h JOIN sec_user u ON u.user_id=h.changed_by
+       WHERE h.jobcard_id=$1 ORDER BY h.jc_status_hist_id`, [id]);
     res.json(jc);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -131,7 +171,11 @@ router.post('/:id/approve-tm', requirePerm('JOB.APPROVE_TM'), async (req, res) =
     const jc = await loadJob(id);
     if (!jc) return res.status(404).json({ error: 'Job card not found' });
     if (jc.jobcard_status !== 'PENDING_TM_APPROVAL') return res.status(409).json({ error: `job is ${jc.jobcard_status}; not awaiting TM approval` });
-    await q("UPDATE tx_jobcard SET jobcard_status='PENDING_OM_APPROVAL', tm_approved_by=$1, tm_approved_at=now(), updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [req.user.user_id, id]);
+    const uid = req.user.user_id;
+    await tx(async (c) => {
+      await c.query("UPDATE tx_jobcard SET jobcard_status='PENDING_OM_APPROVAL', tm_approved_by=$1, tm_approved_at=now(), updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [uid, id]);
+      await logStatus(c, id, jc.jobcard_status, 'PENDING_OM_APPROVAL', jc.site_id, uid, (req.body || {}).note || 'TM approved');
+    });
     res.json({ jobcard_id: id, jobcard_status: 'PENDING_OM_APPROVAL' });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -142,7 +186,11 @@ router.post('/:id/approve-om', requirePerm('JOB.APPROVE_OM'), async (req, res) =
     const jc = await loadJob(id);
     if (!jc) return res.status(404).json({ error: 'Job card not found' });
     if (jc.jobcard_status !== 'PENDING_OM_APPROVAL') return res.status(409).json({ error: `job is ${jc.jobcard_status}; not awaiting OM approval` });
-    await q("UPDATE tx_jobcard SET jobcard_status='APPROVED', om_approved_by=$1, om_approved_at=now(), updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [req.user.user_id, id]);
+    const uid = req.user.user_id;
+    await tx(async (c) => {
+      await c.query("UPDATE tx_jobcard SET jobcard_status='APPROVED', om_approved_by=$1, om_approved_at=now(), updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [uid, id]);
+      await logStatus(c, id, jc.jobcard_status, 'APPROVED', jc.site_id, uid, (req.body || {}).note || 'OM approved');
+    });
     res.json({ jobcard_id: id, jobcard_status: 'APPROVED' });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -153,7 +201,12 @@ router.post('/:id/reject', requirePerm('JOB.APPROVE_TM'), async (req, res) => {
     const jc = await loadJob(id);
     if (!jc) return res.status(404).json({ error: 'Job card not found' });
     if (!['PENDING_TM_APPROVAL', 'PENDING_OM_APPROVAL'].includes(jc.jobcard_status)) return res.status(409).json({ error: `job is ${jc.jobcard_status}; not pending approval` });
-    await q("UPDATE tx_jobcard SET jobcard_status='REJECTED', hold_reason=$1, updated_by=$2, updated_at=now() WHERE jobcard_id=$3", [(req.body || {}).reason || null, req.user.user_id, id]);
+    const uid = req.user.user_id;
+    const reason = (req.body || {}).reason || null;
+    await tx(async (c) => {
+      await c.query("UPDATE tx_jobcard SET jobcard_status='REJECTED', hold_reason=$1, updated_by=$2, updated_at=now() WHERE jobcard_id=$3", [reason, uid, id]);
+      await logStatus(c, id, jc.jobcard_status, 'REJECTED', jc.site_id, uid, reason || 'rejected');
+    });
     res.json({ jobcard_id: id, jobcard_status: 'REJECTED' });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -164,7 +217,11 @@ router.post('/:id/start', requirePerm('JOB.WRITE'), async (req, res) => {
     const jc = await loadJob(id);
     if (!jc) return res.status(404).json({ error: 'Job card not found' });
     if (!['APPROVED', 'ASSIGNED_WORKSHOP', 'ON_HOLD'].includes(jc.jobcard_status)) return res.status(409).json({ error: `job is ${jc.jobcard_status}; must be APPROVED to start` });
-    await q("UPDATE tx_jobcard SET jobcard_status='IN_PROGRESS', work_started_at=COALESCE(work_started_at, now()), updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [req.user.user_id, id]);
+    const uid = req.user.user_id;
+    await tx(async (c) => {
+      await c.query("UPDATE tx_jobcard SET jobcard_status='IN_PROGRESS', work_started_at=COALESCE(work_started_at, now()), updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [uid, id]);
+      await logStatus(c, id, jc.jobcard_status, 'IN_PROGRESS', jc.site_id, uid, 'work started');
+    });
     res.json({ jobcard_id: id, jobcard_status: 'IN_PROGRESS' });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -175,7 +232,11 @@ router.post('/:id/complete', requirePerm('JOB.WRITE'), async (req, res) => {
     const jc = await loadJob(id);
     if (!jc) return res.status(404).json({ error: 'Job card not found' });
     if (!['IN_PROGRESS', 'AWAITING_PARTS', 'AWAITING_OUTSIDE_REPAIR'].includes(jc.jobcard_status)) return res.status(409).json({ error: `job is ${jc.jobcard_status}; not in progress` });
-    await q("UPDATE tx_jobcard SET jobcard_status='WORK_COMPLETED', work_completed_at=now(), updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [req.user.user_id, id]);
+    const uid = req.user.user_id;
+    await tx(async (c) => {
+      await c.query("UPDATE tx_jobcard SET jobcard_status='WORK_COMPLETED', work_completed_at=now(), updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [uid, id]);
+      await logStatus(c, id, jc.jobcard_status, 'WORK_COMPLETED', jc.site_id, uid, 'work completed');
+    });
     res.json({ jobcard_id: id, jobcard_status: 'WORK_COMPLETED' });
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
@@ -391,8 +452,13 @@ router.post('/:id/cost', requirePerm('JOB.COST'), async (req, res) => {
     const id = Number(req.params.id);
     const uid = req.user.user_id;
     const out = await tx(async (c) => {
+      const before = (await c.query('SELECT jobcard_status, site_id FROM tx_jobcard WHERE jobcard_id=$1 AND is_active', [id])).rows[0];
+      if (!before) throw new Error('Job card not found');
       const cost = await rollupCost(c, id, uid);
-      await c.query("UPDATE tx_jobcard SET jobcard_status='PENDING_CLOSURE', updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [uid, id]);
+      if (before.jobcard_status !== 'PENDING_CLOSURE') {   // idempotent: re-costing a pending job logs nothing new
+        await c.query("UPDATE tx_jobcard SET jobcard_status='PENDING_CLOSURE', updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [uid, id]);
+        await logStatus(c, id, before.jobcard_status, 'PENDING_CLOSURE', before.site_id, uid, 'cost calculated → pending closure');
+      }
       return cost;
     });
     res.json(out);
@@ -404,7 +470,7 @@ router.post('/:id/cost', requirePerm('JOB.COST'), async (req, res) => {
 router.post('/:id/close', requirePerm('JOB.CLOSE'), async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const jc = await one('SELECT tm_approved_at, om_approved_at FROM tx_jobcard WHERE jobcard_id=$1 AND is_active', [id]);
+    const jc = await one('SELECT jobcard_status, site_id, tm_approved_at, om_approved_at FROM tx_jobcard WHERE jobcard_id=$1 AND is_active', [id]);
     if (!jc) return res.status(404).json({ error: 'Job card not found' });
     if (!jc.tm_approved_at || !jc.om_approved_at) return res.status(409).json({ error: 'Cannot close: transport-manager and operational-manager approvals must be complete.' });
     const cost = await one('SELECT cost_status, is_provisional FROM cost_job_summary WHERE jobcard_id=$1', [id]);
@@ -414,6 +480,7 @@ router.post('/:id/close', requirePerm('JOB.CLOSE'), async (req, res) => {
     await tx(async (c) => {
       await c.query("UPDATE cost_job_summary SET cost_status='FINALIZED', finalized_by=$1, finalized_at=now() WHERE jobcard_id=$2", [uid, id]);
       await c.query("UPDATE tx_jobcard SET jobcard_status='CLOSED', closed_at=now(), updated_by=$1, updated_at=now() WHERE jobcard_id=$2", [uid, id]);
+      await logStatus(c, id, jc.jobcard_status, 'CLOSED', jc.site_id, uid, 'closed (approved + costed)');
     });
     res.json({ ok: true, jobcard_status: 'CLOSED' });
   } catch (e) { res.status(400).json({ error: e.message }); }

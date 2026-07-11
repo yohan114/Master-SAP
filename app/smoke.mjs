@@ -37,6 +37,8 @@ const admin = await login('admin', 'ChangeMe@Admin1');
 A('admin login 200', admin.status === 200);
 const foreman = await login('foreman', 'ChangeMe@Fore1');
 const viewer = await login('viewer', 'ChangeMe@View1');
+const tm = await login('tm', 'ChangeMe@TM1');   // transport_manager: JOB.APPROVE_TM
+const om = await login('om', 'ChangeMe@OM1');    // operations_manager: JOB.APPROVE_OM
 A('viewer CANNOT create a job -> 403', (await api('/api/jobcards', viewer.cookie, 'POST', { asset_id: ids.asset, location_id: ids.site })).status === 403);
 
 console.log('\nJOB FLOW (foreman)');
@@ -117,6 +119,41 @@ const delLab = await api(`/api/jobcards/${jD}/labour/${labB.body.labour_id}`, fo
 A('DELETE labour removes the line + re-runs the roll-up (labour back to 1500)',
   delLab.body.total_job_cost === 1500 && (await api(`/api/jobcards/${jD}`, admin.cookie)).body.labour.length === 1, delLab.body);
 A('DELETE an already-removed labour line -> 404', (await api(`/api/jobcards/${jD}/labour/${labB.body.labour_id}`, foreman.cookie, 'DELETE')).status === 404);
+
+console.log('\nTWO-LEVEL APPROVAL AUDIT (hist_jobcard_status) + pending-my-action');
+// NOTE: this app's approval workflow is PENDING_TM_APPROVAL -> PENDING_OM_APPROVAL -> APPROVED
+// -> (cost) PENDING_CLOSURE -> CLOSED, gated by permissions JOB.APPROVE_TM / JOB.APPROVE_OM
+// (roles transport_manager / operations_manager). A job is "submitted" at creation.
+const jobA = await api('/api/jobcards', foreman.cookie, 'POST', { asset_id: ids.asset, location_id: ids.site, estimated_cost: 8000, reported_defect: 'Clutch replacement' });
+const jA = jobA.body.jobcard_id;
+A('create logs the opening transition (→ PENDING_TM_APPROVAL) in hist_jobcard_status',
+  (await q('SELECT to_status FROM hist_jobcard_status WHERE jobcard_id=$1 ORDER BY jc_status_hist_id', [jA])).map((r) => r.to_status).join() === 'PENDING_TM_APPROVAL');
+A('pending-my-action (TM) surfaces the new job as "TM approval"',
+  (await api('/api/jobcards/pending-my-action', tm.cookie)).body.rows.some((r) => r.jobcard_id === jA && r.action === 'TM approval'));
+A('pending-my-action (OM) does NOT surface a job still awaiting TM',
+  !(await api('/api/jobcards/pending-my-action', om.cookie)).body.rows.some((r) => r.jobcard_id === jA));
+A('TM approval is permission-gated: foreman (no JOB.APPROVE_TM) -> 403',
+  (await api(`/api/jobcards/${jA}/approve-tm`, foreman.cookie, 'POST', {})).status === 403);
+await api(`/api/jobcards/${jA}/approve-tm`, tm.cookie, 'POST', {});
+A('after TM approval, pending-my-action (OM) surfaces it as "OM approval"',
+  (await api('/api/jobcards/pending-my-action', om.cookie)).body.rows.some((r) => r.jobcard_id === jA && r.action === 'OM approval'));
+A('after TM approval, pending-my-action (TM) no longer surfaces it',
+  !(await api('/api/jobcards/pending-my-action', tm.cookie)).body.rows.some((r) => r.jobcard_id === jA));
+await api(`/api/jobcards/${jA}/approve-om`, om.cookie, 'POST', {});
+await api(`/api/jobcards/${jA}/labour`, foreman.cookie, 'POST', { employee_id: ids.tech, hours: 2 });
+await api(`/api/jobcards/${jA}/cost`, foreman.cookie, 'POST');
+const closeA = await api(`/api/jobcards/${jA}/close`, foreman.cookie, 'POST');
+A('full happy path (submit→TM→OM→cost→close) -> CLOSED', closeA.body.jobcard_status === 'CLOSED', closeA.body);
+const chainA = (await q('SELECT to_status FROM hist_jobcard_status WHERE jobcard_id=$1 ORDER BY jc_status_hist_id', [jA])).map((r) => r.to_status);
+A('hist_jobcard_status records the full chain TM→OM→APPROVED→PENDING_CLOSURE→CLOSED',
+  JSON.stringify(chainA) === JSON.stringify(['PENDING_TM_APPROVAL', 'PENDING_OM_APPROVAL', 'APPROVED', 'PENDING_CLOSURE', 'CLOSED']), chainA);
+A('every history row is stamped with a changer + timestamp',
+  (await q('SELECT changed_by, changed_at FROM hist_jobcard_status WHERE jobcard_id=$1', [jA])).every((r) => r.changed_by && r.changed_at));
+A('a CLOSED job appears in nobody’s pending-my-action',
+  !(await api('/api/jobcards/pending-my-action', om.cookie)).body.rows.some((r) => r.jobcard_id === jA)
+  && !(await api('/api/jobcards/pending-my-action', tm.cookie)).body.rows.some((r) => r.jobcard_id === jA));
+A('GET job now carries its status_history (5 transitions)',
+  (await api(`/api/jobcards/${jA}`, admin.cookie)).body.status_history.length === 5);
 
 console.log('\nONE SYSTEM: stores issue flows into a job cost (MWAC ledger)');
 const keeper = await login('keeper', 'ChangeMe@Keep1');

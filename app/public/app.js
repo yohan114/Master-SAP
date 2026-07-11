@@ -81,6 +81,15 @@ async function dashboard() {
     `<div class="kpi"><div class="v${x.warn && Number(x.v) > 0 ? ' warn' : ''}" data-kpi="${i}">${x.pre ? `<small>${x.pre}</small> ` : ''}0</div><div class="l">${esc(x.l)}</div></div>`).join('')}</div>`);
   v.append(row);
   kpis.forEach((x, i) => animateCount(row.querySelector(`[data-kpi="${i}"]`), x));   // count up 0 → real value
+  // job cards awaiting THIS user's next action in the approval workflow
+  try {
+    const mine = (await api('/api/jobcards/pending-my-action')).rows;
+    if (mine.length) v.append(card(`Awaiting your action (${mine.length})`, table([
+      { h: 'JC Number', k: 'jobcard_no' }, { h: 'Asset', r: (r) => esc(`${r.asset_no} · ${r.asset_name}`) },
+      { h: 'Your action', r: (r) => `<span class="pill p-build">${esc(r.action)}</span>` },
+      { h: 'Est.', n: true, r: (r) => money(r.estimated_cost) },
+    ], mine, { click: (r) => openJob(r.jobcard_id) }), '<span class="pill p-block">action needed</span>'));
+  } catch { /* endpoint optional */ }
   v.append(card('Stock movement — last 7 days', sparkline(k.stockTrend || [])));
   await alertsPanel(v);
   v.append(card('Recent job cards', table([
@@ -550,6 +559,15 @@ async function openJob(id, activeTab) {
   main.append(card('Progress log', table([{ h: 'Date', k: 'progress_date' }, { h: 'Work done', k: 'work_done' },
     { h: '%', n: true, r: (r) => int(r.pct_complete) }, { h: 'Hrs', n: true, r: (r) => int(r.hours_spent) },
     { h: 'By', r: (r) => esc(r.logged_by || '—') }], j.progress || [])));
+
+  // approval / status audit trail (from hist_jobcard_status)
+  main.append(card('Status history', table([
+    { h: 'From', r: (r) => r.from_status ? statusPill(r.from_status) : '<span class="muted">— new —</span>' },
+    { h: 'To', r: (r) => statusPill(r.to_status) },
+    { h: 'By', k: 'changed_by' },
+    { h: 'When', r: (r) => esc(String(r.changed_at || '').replace('T', ' ').slice(0, 16)) },
+    { h: 'Note', r: (r) => esc(r.note || '') },
+  ], j.status_history || [])));
 
   // --- cost summary sidebar (live compute from /cost-summary) ---
   side.append(await jobCostSidebar(id, s));

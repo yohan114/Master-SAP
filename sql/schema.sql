@@ -1605,6 +1605,21 @@ CREATE TABLE cost_job_line (
         ('MATERIAL','LABOUR','OUTSIDE','GENERAL','OVERHEAD'))
 );
 
+-- Append-only audit of job-card status transitions (the two-level approval workflow and close).
+-- One row per move: who changed it, from -> to, when, and an optional note. from_status is NULL for
+-- the opening transition. Mirrors the hist_battery_event pattern (hist_ = immutable history).
+CREATE TABLE hist_jobcard_status (
+    jc_status_hist_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    jobcard_id   BIGINT NOT NULL REFERENCES tx_jobcard(jobcard_id),
+    from_status  VARCHAR(28),
+    to_status    VARCHAR(28) NOT NULL,
+    note         VARCHAR(300),
+    changed_by   BIGINT      NOT NULL REFERENCES sec_user(user_id),
+    changed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    site_id      BIGINT      NOT NULL REFERENCES md_location(location_id)
+);
+CREATE INDEX ix_hist_jobcard_status_jc ON hist_jobcard_status(jobcard_id, jc_status_hist_id);
+
 CREATE TABLE cost_variance (
     variance_id  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     jobcard_id   BIGINT NOT NULL REFERENCES tx_jobcard(jobcard_id),

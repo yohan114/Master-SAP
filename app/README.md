@@ -1,6 +1,6 @@
 # UMMS app — one unified system (PostgreSQL **or** SQLite)
 
-**One system, one login, one database** on the validated 74‑table schema — not separate apps. Shared
+**One system, one login, one database** on the validated 75‑table schema — not separate apps. Shared
 foundation (auth, RBAC, site‑scope, numbering) and a **single inventory engine** (`lib/inventory.js`)
 under all four domains: **Stores**, **Oil/Lubricant**, **Battery**, and **Workshop Job‑Card + Costing** —
 wired together so a stock or oil issue flows straight into a job's final cost.
@@ -10,10 +10,10 @@ wired together so a stock or oil issue flows straight into a job's final cost.
 - **SQLite** (`DB_ENGINE=sqlite`) — a single local file, zero DB server to run. Schema:
   `sql/schema.sqlite.sql` (generated from the Postgres schema — `node sql/gen-sqlite-schema.js`).
   Great for a laptop trial, a single‑PC install, or matching the legacy SQLite books. The whole
-  suite passes **99/99 on both engines** with the same code (`db.js` translates the handful of
+  suite passes **110/110 on both engines** with the same code (`db.js` translates the handful of
   Postgres‑isms and picks the engine from `DB_ENGINE` / `SQLITE_DB`).
 
-## What works (verified end‑to‑end — `npm run smoke`, 99/99)
+## What works (verified end‑to‑end — `npm run smoke`, 110/110)
 
 **One‑system integration (the point):** receive parts into stores → moving‑average cost rolls forward
 (10@1500 + 10@1700 → **1,600**) → issue to a workshop job → the issue **auto‑posts as a job part** →
@@ -80,6 +80,11 @@ by the live stock balance. All in one app.
   estimate; `is_provisional` set if any provisional line exists.
 - **Close gating (core rule #3)** — cannot close until **both approvals are complete**, a cost roll‑up
   exists, and no cost is provisional (→ 409).
+- **Status audit trail** — every transition (create → TM approve → OM approve → cost → close, plus
+  start/complete/reject) appends a row to `hist_jobcard_status` (from → to · who · when · note) in the
+  same commit as the status change; it's returned on the job and shown as a Status‑history timeline.
+  **`GET /api/jobcards/pending-my-action`** lists the cards awaiting the caller's next step (TM approval /
+  OM approval / close), decided by their permissions — feeding the dashboard's "awaiting your action" card.
 
 ### Reports & exports (`routes/reports.js`)
 - **13 read‑only reports** over the data every module captures: stock ledger, stock balance & valuation,
@@ -151,7 +156,7 @@ export DB_ENGINE=sqlite SQLITE_DB=./umms.sqlite   # one local file
 node init-db.js       # loads sql/schema.sqlite.sql into a fresh file
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 99/99  (start the server first, in another shell)
+npm run smoke         # 110/110  (start the server first, in another shell)
 ```
 
 ### Option B — PostgreSQL
@@ -163,7 +168,7 @@ cd app && npm install
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=umms   # PG* env, no secrets in code
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 99/99
+npm run smoke         # 110/110
 ```
 
 The same `migrate-legacy.js` / `backfill-opening.js` work under either engine (prefix `DB_ENGINE=sqlite`
