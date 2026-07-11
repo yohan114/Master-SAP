@@ -175,6 +175,29 @@ const xstock = (await api('/api/stores/stock', admin.cookie)).body.rows.filter((
 A('stock now shows the spare at BOTH locations (HQ 6 + ST2 4)',
   xstock.length === 2 && Number(xstock.reduce((s, r) => s + Number(r.on_hand_qty), 0)) === 10, xstock);
 
+console.log('\nPROCUREMENT (PO → receive/GRN → pending price → confirm/revalue)');
+A('viewer CANNOT raise a PO -> 403',
+  (await api('/api/purchase/po', viewer.cookie, 'POST', { location_id: ids.site, lines: [{ item_id: ids.general, order_qty: 10, unit_price: 50 }] })).status === 403);
+// one priced line (general @ 50) + one price-on-receipt line (battery model, no price)
+const po = await api('/api/purchase/po', keeper.cookie, 'POST', { po_type: 'LOCAL', location_id: ids.site, lines: [
+  { item_id: ids.general, order_qty: 10, unit_price: 50 },
+  { item_id: ids.batmodel, order_qty: 4 }] });
+A('raise PO -> PO-HQ-.. DRAFT, 2 lines', po.status === 200 && /^PO-HQ-\d\d-\d{6}$/.test(po.body.po_no) && po.body.doc_status === 'DRAFT' && po.body.lines === 2, po.body);
+const poId = po.body.po_id;
+A('cannot receive before approve -> 409', (await api(`/api/purchase/po/${poId}/receive`, keeper.cookie, 'POST', {})).status === 409);
+A('approve PO -> APPROVED', (await api(`/api/purchase/po/${poId}/approve`, keeper.cookie, 'POST', {})).body.doc_status === 'APPROVED');
+const poRcv = await api(`/api/purchase/po/${poId}/receive`, keeper.cookie, 'POST', {});
+A('receive both lines -> PO RECEIVED, one priced + one pending', poRcv.body.po_status === 'RECEIVED'
+  && poRcv.body.lines.length === 2 && poRcv.body.lines.some((l) => l.priced) && poRcv.body.lines.some((l) => l.pending_id), poRcv.body);
+const genStock = (await api('/api/stores/stock', admin.cookie)).body.rows.find((r) => r.item_no === 'GN-0001');
+A('priced line valued immediately: general 10 @ 50 = 500', genStock && Number(genStock.on_hand_qty) === 10 && Number(genStock.moving_avg_cost) === 50, genStock);
+const pend = (await api('/api/purchase/pending', admin.cookie)).body.rows;
+A('pending-price list shows the battery-model line (provisional, unconfirmed)',
+  pend.length === 1 && pend[0].item_no === 'BT-0001' && pend[0].price_status === 'PENDING', pend);
+const conf = await api(`/api/purchase/pending/${pend[0].pending_id}/confirm`, keeper.cookie, 'POST', { unit_cost: 5000 });
+A('confirm price 5000 -> revalue: variance 20000, MWAC 5000', conf.body.variance_amt === 20000 && conf.body.new_avg_cost === 5000, conf.body);
+A('pending list is now empty (all confirmed)', (await api('/api/purchase/pending', admin.cookie)).body.rows.length === 0);
+
 await end();
 console.log(`\n${pass} passed, ${fail} failed`);
 process.exit(fail ? 1 : 0);

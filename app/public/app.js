@@ -41,9 +41,9 @@ $('#loginForm').addEventListener('submit', async (e) => {
 $('#logout').addEventListener('click', async () => { await api('/auth/logout', { method: 'POST' }); location.reload(); });
 $('#nav').addEventListener('click', (e) => { const a = e.target.closest('a[data-view]'); if (a) route(a.dataset.view); });
 
-const VIEWS = { dashboard, stores, mrn, oil, battery, workshop };
-const CRUMB = { dashboard: 'Overview', stores: 'Inventory', mrn: 'Requisitions', oil: 'Lubricant book', battery: 'Serial lifecycle', workshop: 'Job costing' };
-const TITLE = { dashboard: 'Dashboard', stores: 'Stores', mrn: 'Requisitions (MRN)', oil: 'Oil & Lubricant', battery: 'Battery', workshop: 'Workshop' };
+const VIEWS = { dashboard, stores, mrn, purchase, oil, battery, workshop };
+const CRUMB = { dashboard: 'Overview', stores: 'Inventory', mrn: 'Requisitions', purchase: 'Procurement', oil: 'Lubricant book', battery: 'Serial lifecycle', workshop: 'Job costing' };
+const TITLE = { dashboard: 'Dashboard', stores: 'Stores', mrn: 'Requisitions (MRN)', purchase: 'Purchasing', oil: 'Oil & Lubricant', battery: 'Battery', workshop: 'Workshop' };
 async function route(v) {
   document.querySelectorAll('#nav a').forEach((a) => a.classList.toggle('active', a.dataset.view === v));
   $('#crumb').textContent = CRUMB[v]; $('#title').textContent = TITLE[v]; $('#topActions').innerHTML = '';
@@ -70,7 +70,8 @@ async function dashboard() {
   const kpis = [
     ['Stores items', int(s.stores_items)], ['Oil products', int(s.oil_products)],
     ['Fleet assets', int(s.assets)], ['Batteries', `${int(s.batteries)} <small>/ ${int(s.batteries_in_service)} fitted</small>`],
-    ['Open MRNs', int(s.mrns_open)], ['Open jobs', int(s.jobs_open)],
+    ['Open MRNs', int(s.mrns_open)], ['Open POs', int(s.pos_open)],
+    ['Pending pricing', int(s.pending_pricing)], ['Open jobs', int(s.jobs_open)],
     ['Stock value', `<small>LKR</small> ${money(s.stock_value)}`],
   ];
   const v = $('#view'); v.innerHTML = '';
@@ -219,6 +220,94 @@ async function openMrn(id) {
     { h: 'Availability', r: mrnAvail },
     { h: 'Line', r: (r) => statusPill(r.line_status) },
   ], m.lines)));
+}
+
+/* ---------- purchasing (PO → GRN → pending price) ---------- */
+async function purchase() {
+  const v = $('#view'); v.innerHTML = '';
+  const pos = (await api('/api/purchase/po')).rows;
+  const pend = (await api('/api/purchase/pending')).rows;
+  if (can('STORES.PO')) $('#topActions').append(btn('+ New PO', newPoForm));
+  const pendCard = card(`Pending pricing (${pend.length})`, table([
+    { h: 'GRN', k: 'grn_no' }, { h: 'Item', r: (r) => esc(`${r.item_no} · ${r.item_name}`) },
+    { h: 'Qty', n: true, r: (r) => int(r.received_qty) }, { h: 'Provisional', n: true, r: (r) => money(r.provisional_unit_cost) },
+    { h: 'Status', r: (r) => statusPill(r.price_status) },
+    { h: '', r: () => can('STORES.PRICE') ? '<button class="btn sm primary" data-confirm>Confirm price</button>' : '' },
+  ], pend));
+  pendCard.querySelectorAll('tbody tr').forEach((tr, i) => { const bx = tr.querySelector('[data-confirm]'); if (bx) bx.onclick = () => confirmPrice(pend[i]); });
+  v.append(pendCard);
+  v.append(card(`Purchase orders (${pos.length})`, table([
+    { h: 'PO No', k: 'po_no' }, { h: 'Type', r: (r) => esc(String(r.po_type).replace('_', ' ').toLowerCase()) },
+    { h: 'Supplier', k: 'supplier_name' }, { h: 'Deliver to', k: 'deliver_to' },
+    { h: 'Value', n: true, r: (r) => money(r.total_amt) }, { h: 'Status', r: (r) => statusPill(r.doc_status) },
+  ], pos, { click: (r) => openPo(r.po_id) })));
+}
+async function newPoForm() {
+  const items = (await api('/api/stores/items')).rows;
+  const itemOpts = `<option value="">— item —</option>` + items.map((i) => `<option value="${i.item_id}">${esc(i.item_no + ' · ' + i.item_name)}</option>`).join('');
+  const lineRow = () => `<div class="row po-line" style="gap:8px;margin-bottom:8px">
+      <select name="item" style="flex:3">${itemOpts}</select>
+      <input name="qty" type="number" placeholder="Order qty" style="flex:1" min="0" step="any">
+      <input name="price" type="number" placeholder="Unit price (blank = on receipt)" style="flex:2" min="0" step="any">
+      <button type="button" class="btn" data-del>✕</button></div>`;
+  const ov = h(`<div id="login" style="background:rgba(10,14,20,.55)"><form class="login-card" style="width:min(680px,94vw)">
+    <div class="brand-row"><h1 style="font-size:16px">New purchase order</h1></div>
+    <label>Type</label><select name="po_type"><option value="LOCAL">Local purchase</option><option value="HEAD_OFFICE">Head office purchase</option></select>
+    <label>Supplier</label><select name="supplier_id">${opt(M.suppliers || [], 'supplier_id', 'supplier_name')}</select>
+    <label>Deliver to</label><select name="location_id">${opt(M.locations, 'location_id', 'location_name')}</select>
+    <label>Order lines <span class="muted" style="font-weight:400">— leave price blank for price‑on‑receipt</span></label>
+    <div id="poLines">${lineRow()}${lineRow()}</div>
+    <button type="button" class="btn sm" data-add>+ add line</button>
+    <div class="row" style="margin-top:20px"><button class="btn primary" type="submit" style="flex:1">Raise PO</button><button type="button" class="btn" data-x>Cancel</button></div>
+    <div class="err"></div></form></div>`);
+  document.body.append(ov);
+  const form = ov.querySelector('form'); const lines = ov.querySelector('#poLines');
+  ov.querySelector('[data-x]').onclick = () => ov.remove();
+  ov.querySelector('[data-add]').onclick = () => lines.append(h(lineRow()));
+  lines.addEventListener('click', (e) => { const d = e.target.closest('[data-del]'); if (d && lines.children.length > 1) d.closest('.po-line').remove(); });
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const body = {
+      po_type: form.querySelector('[name=po_type]').value,
+      supplier_id: form.querySelector('[name=supplier_id]').value || null,
+      location_id: form.querySelector('[name=location_id]').value,
+      lines: [...lines.querySelectorAll('.po-line')].map((r) => ({
+        item_id: r.querySelector('[name=item]').value, order_qty: Number(r.querySelector('[name=qty]').value),
+        unit_price: r.querySelector('[name=price]').value ? Number(r.querySelector('[name=price]').value) : undefined,
+      })).filter((x) => x.item_id && x.order_qty > 0),
+    };
+    if (!body.lines.length) { form.querySelector('.err').textContent = 'Add at least one line with a quantity.'; return; }
+    try { const r = await api('/api/purchase/po', { method: 'POST', body: JSON.stringify(body) }); ov.remove(); toast('PO ' + r.po_no + ' raised'); openPo(r.po_id); }
+    catch (err) { form.querySelector('.err').textContent = err.message; }
+  });
+}
+function confirmPrice(p) {
+  formModal(`Confirm price — ${p.item_no}`, [
+    { k: 'unit_cost', l: `Confirmed unit cost (LKR) · provisional was ${money(p.provisional_unit_cost)}`, type: 'number' },
+  ], async (d) => { const r = await api(`/api/purchase/pending/${p.pending_id}/confirm`, { method: 'POST', body: JSON.stringify(d) }); toast(`Priced · variance ${money(r.variance_amt)}`); route('purchase'); });
+}
+async function openPo(id) {
+  const p = await api('/api/purchase/po/' + id);
+  const v = $('#view'); v.innerHTML = ''; v.append(backBtn('purchase'));
+  const bar = h('<div class="row" style="margin-bottom:18px"></div>');
+  if (can('STORES.PO') && p.doc_status === 'DRAFT')
+    bar.append(btnP('Approve', async () => { try { await api(`/api/purchase/po/${id}/approve`, { method: 'POST', body: '{}' }); toast('PO approved'); openPo(id); } catch (e) { toast(e.message, true); } }));
+  if (can('STORES.RECEIVE') && ['APPROVED', 'PARTIAL'].includes(p.doc_status))
+    bar.append(btnP('Receive all', async () => { try { const r = await api(`/api/purchase/po/${id}/receive`, { method: 'POST', body: '{}' }); toast('Received → ' + r.po_status.toLowerCase()); openPo(id); } catch (e) { toast(e.message, true); } }));
+  const info = h(`<div class="row" style="margin-bottom:6px">
+    <div><div class="crumb">Type</div><b>${esc(String(p.po_type).replace('_', ' '))}</b></div>
+    <div><div class="crumb">Supplier</div><b>${esc(p.supplier_name)}</b></div>
+    <div><div class="crumb">Deliver to</div><b>${esc(p.deliver_to)}</b></div>
+    <div><div class="crumb">Status</div>${statusPill(p.doc_status)}</div></div>`);
+  const wrap = document.createElement('div'); wrap.append(info, bar);
+  v.append(card(esc(p.po_no), wrap));
+  v.append(card('Order lines', table([
+    { h: 'Item', r: (r) => esc(`${r.item_no} · ${r.item_name}`) },
+    { h: 'Ordered', n: true, r: (r) => `${int(r.order_qty)} ${esc(r.uom_code || '')}` },
+    { h: 'Received', n: true, r: (r) => int(r.received_qty) },
+    { h: 'Unit price', n: true, r: (r) => r.unit_price != null ? money(r.unit_price) : '<span class="muted">on receipt</span>' },
+    { h: 'Line', r: (r) => statusPill(r.line_status) },
+  ], p.lines)));
 }
 
 /* ---------- oil ---------- */

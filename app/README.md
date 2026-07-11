@@ -10,10 +10,10 @@ wired together so a stock or oil issue flows straight into a job's final cost.
 - **SQLite** (`DB_ENGINE=sqlite`) — a single local file, zero DB server to run. Schema:
   `sql/schema.sqlite.sql` (generated from the Postgres schema — `node sql/gen-sqlite-schema.js`).
   Great for a laptop trial, a single‑PC install, or matching the legacy SQLite books. The whole
-  suite passes **47/47 on both engines** with the same code (`db.js` translates the handful of
+  suite passes **56/56 on both engines** with the same code (`db.js` translates the handful of
   Postgres‑isms and picks the engine from `DB_ENGINE` / `SQLITE_DB`).
 
-## What works (verified end‑to‑end — `npm run smoke`, 47/47)
+## What works (verified end‑to‑end — `npm run smoke`, 56/56)
 
 **One‑system integration (the point):** receive parts into stores → moving‑average cost rolls forward
 (10@1500 + 10@1700 → **1,600**) → issue to a workshop job → the issue **auto‑posts as a job part** →
@@ -41,6 +41,16 @@ by the live stock balance. All in one app.
   purchase). Typing an item that already exists in the master is **blocked**, so the catalogue stays clean.
 - **Same engine, same flow.** Fulfilment of general lines reuses the shared issue engine, so an MRN raised
   against a job card posts its parts straight onto that job — one flow, no re‑keying.
+
+### Procurement module (`routes/purchase.js`)
+- **Purchase orders** — Local **and** Head‑Office POs: raise (lines priced now *or* price‑on‑receipt),
+  approve, optionally from an approved MRN. Numbered `PO-<SITE>-YY-NNNNNN`.
+- **Receive → GRN** — receiving posts an `IN` movement per line at the shared MWAC engine under one
+  `tx_grn`. Priced lines value immediately; **price‑on‑receipt** lines come in at the last MWAC
+  (provisional) and raise a **pending‑price** row. PO rolls to `PARTIAL` / `RECEIVED`.
+- **Pending price → confirm** — confirming a price **revalues** the stock by the variance (a `REVAL`
+  ledger movement), rolls MWAC, and clears the pending row — so valuation catches up (effective‑price /
+  pending‑pricing rule). Dashboard shows open POs + pending‑pricing counts.
 
 ### Oil / Lubricant module (`routes/oil.js`)
 - **Receive / issue** on the same engine — an oil issue requires a **vehicle/machine** (`asset_id`) and
@@ -77,6 +87,7 @@ by the live stock balance. All in one app.
 | `routes/stores.js` | the Stores module (receive/GRN · issue · MWAC ledger · issue→job link) |
 | `routes/transfers.js` | material transfers between locations (XFER_OUT/XFER_IN, one ledgered doc) |
 | `routes/mrn.js` | the Requisitions module (MRN raise · approve · fulfil‑from‑stock → issue) |
+| `routes/purchase.js` | Procurement (Local/HO PO · approve · receive→GRN · pending‑price · confirm→revalue) |
 | `routes/oil.js` | the Oil/Lubricant module (receive · issue‑to‑vehicle · consumption · stock count) |
 | `routes/battery.js` | the Battery module (serial lifecycle · event history) |
 | `routes/jobcards.js` | the Workshop module (jobs · labour · parts · cost · close) |
@@ -109,7 +120,7 @@ export DB_ENGINE=sqlite SQLITE_DB=./umms.sqlite   # one local file
 node init-db.js       # loads sql/schema.sqlite.sql into a fresh file
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 47/47  (start the server first, in another shell)
+npm run smoke         # 56/56  (start the server first, in another shell)
 ```
 
 ### Option B — PostgreSQL
@@ -121,7 +132,7 @@ cd app && npm install
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=umms   # PG* env, no secrets in code
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 47/47
+npm run smoke         # 56/56
 ```
 
 The same `migrate-legacy.js` / `backfill-opening.js` work under either engine (prefix `DB_ENGINE=sqlite`

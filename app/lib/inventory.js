@@ -178,4 +178,4 @@ async function postTransfer(c, { itemId, fromLoc, toLoc, qty, date, siteId, user
   return { transfer_id: trf.transfer_id, unit_cost: avg, line_amt: lineAmt, from_on_hand: sQty, to_on_hand: dQty, to_avg_cost: dAvg };
 }
 
-module.exports = { postReceive, postIssue, postCount, postTransfer, balanceOf, siteCodeOf, money, qty4 };
+module.exports = { postReceive, postIssue, postCount, postTransfer, balanceOf, upsertBalance, siteCodeOf, money, qty4, avg4 };

@@ -29,6 +29,8 @@ app.get('/api/summary', async (req, res) => {
       (SELECT count(*) FROM tx_jobcard WHERE is_active) jobs,
       (SELECT count(*) FROM tx_jobcard WHERE is_active AND jobcard_status NOT IN ('CLOSED','CANCELLED')) jobs_open,
       (SELECT count(*) FROM tx_mrn WHERE is_active AND doc_status NOT IN ('CLOSED','CANCELLED')) mrns_open,
+      (SELECT count(*) FROM tx_po WHERE is_active AND doc_status NOT IN ('RECEIVED','CANCELLED','CLOSED')) pos_open,
+      (SELECT count(*) FROM inv_pending_price WHERE is_active AND price_status<>'CONFIRMED') pending_pricing,
       (SELECT COALESCE(SUM(stock_value),0) FROM inv_stock_balance) stock_value,
       (SELECT COALESCE(SUM(total_job_cost),0) FROM cost_job_summary WHERE cost_status='FINALIZED') jobs_costed_value`))[0];
     res.json(s);
@@ -42,12 +44,14 @@ app.get('/api/masters', async (req, res) => {
       employees: await q("SELECT employee_id, employee_no, employee_name FROM md_employee WHERE is_active AND is_technician ORDER BY employee_no"),
       uoms: await q("SELECT uom_id, uom_code, uom_name FROM md_uom WHERE is_active ORDER BY uom_code"),
       categories: await q("SELECT category_id, category_code, category_name FROM md_item_category WHERE is_active ORDER BY category_name"),
+      suppliers: await q("SELECT supplier_id, supplier_no, supplier_name FROM md_supplier WHERE is_active ORDER BY supplier_name"),
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 app.use('/api/jobcards', require('./routes/jobcards'));
 app.use('/api/stores', require('./routes/stores'));
 app.use('/api/transfers', require('./routes/transfers'));
+app.use('/api/purchase', require('./routes/purchase'));
 app.use('/api/oil', require('./routes/oil'));
 app.use('/api/battery', require('./routes/battery'));
 app.use('/api/mrn', require('./routes/mrn'));
