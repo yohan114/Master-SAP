@@ -28,7 +28,8 @@ const ids = (await q(`SELECT
   (SELECT item_id FROM md_item WHERE item_no='BT-0001') batmodel,
   (SELECT asset_id FROM md_asset WHERE asset_no='VEH-0002') asset2,
   (SELECT employee_id FROM md_employee WHERE employee_no='EMP-0001') tech,
-  (SELECT uom_id FROM md_uom WHERE uom_code='NOS') uom`))[0];
+  (SELECT uom_id FROM md_uom WHERE uom_code='NOS') uom,
+  (SELECT location_id FROM md_location WHERE location_code='ST2') site2`))[0];
 
 console.log('AUTH + RBAC');
 const admin = await login('admin', 'ChangeMe@Admin1');
@@ -161,6 +162,18 @@ const oLine = (mg.body.lines || []).find((l) => l.item_source === 'OTHER');
 A('general line issued 2 (stock 12 -> 10), CLOSED', Number(gLine.issued_qty) === 2 && Number(gLine.on_hand_qty) === 10 && gLine.line_status === 'CLOSED', gLine);
 A('other line bypassed stock: typed desc + reason, no item_id, PENDING_PO',
   oLine.item_id == null && oLine.item_description === 'Special seal kit XYZ' && !!oLine.request_reason && oLine.line_status === 'PENDING_PO', oLine);
+
+console.log('\nMATERIAL TRANSFER between locations (source down, destination up — core rule #7; spare now 10 @ HQ)');
+const xf = await api('/api/transfers', keeper.cookie, 'POST', { item_id: ids.spare, from_location_id: ids.site, to_location_id: ids.site2, qty: 4 });
+A('transfer 4 @ MWAC 1600: HQ 10->6, ST2 0->4 @ 1600, value 6400',
+  xf.body.from_on_hand === 6 && xf.body.to_on_hand === 4 && xf.body.to_avg_cost === 1600 && xf.body.line_amt === 6400, xf.body);
+A('transfer to the same location is rejected (400)',
+  (await api('/api/transfers', keeper.cookie, 'POST', { item_id: ids.spare, from_location_id: ids.site, to_location_id: ids.site, qty: 1 })).status === 400);
+A('over-transfer blocked by source stock (400)',
+  (await api('/api/transfers', keeper.cookie, 'POST', { item_id: ids.spare, from_location_id: ids.site, to_location_id: ids.site2, qty: 9999 })).status === 400);
+const xstock = (await api('/api/stores/stock', admin.cookie)).body.rows.filter((r) => r.item_no === 'SP-0001');
+A('stock now shows the spare at BOTH locations (HQ 6 + ST2 4)',
+  xstock.length === 2 && Number(xstock.reduce((s, r) => s + Number(r.on_hand_qty), 0)) === 10, xstock);
 
 await end();
 console.log(`\n${pass} passed, ${fail} failed`);

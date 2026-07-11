@@ -129,4 +129,53 @@ async function postCount(c, { itemId, locationId, countedQty, date, siteId, user
   return { book_qty: book, counted_qty: qty4(countedQty), variance, adjusted: true, direction: dir, value_impact: money(absQ * avg) };
 }
 
-module.exports = { postReceive, postIssue, postCount, balanceOf, siteCodeOf, money, qty4 };
+// Transfer stock between two locations: OUT of source at its MWAC, IN to destination (rolling the
+// destination's MWAC). Both post append-only ledger rows against one tx_transfer document, so the
+// core rule holds — source falls, destination rises, and the movement is fully traceable.
+async function postTransfer(c, { itemId, fromLoc, toLoc, qty, date, siteId, userId }) {
+  if (!(qty > 0)) throw new Error('qty must be > 0');
+  if (Number(fromLoc) === Number(toLoc)) throw new Error('source and destination must differ');
+  const src = await balanceOf(c, itemId, fromLoc);
+  if (src._new || Number(src.on_hand_qty) < qty)
+    throw new Error(`insufficient stock at source: on hand ${Number(src.on_hand_qty) || 0}, transfer ${qty}`);
+  const avg = Number(src.moving_avg_cost);
+  const lineAmt = money(qty * avg);
+  const scode = await siteCodeOf(c, siteId);
+  const item = (await c.query('SELECT base_uom_id FROM md_item WHERE item_id=$1', [itemId])).rows[0];
+
+  const trf = (await c.query(
+    `INSERT INTO tx_transfer(transfer_no, transfer_date, from_location_id, to_location_id, from_site_id, to_site_id,
+         total_amt, doc_status, site_id, created_by)
+     VALUES($1,$2,$3,$4,$5,$5,$6,'POSTED',$5,$7) RETURNING transfer_id`,
+    [await nextNo('TRF', scode, date, c), date, fromLoc, toLoc, siteId, lineAmt, userId])).rows[0];
+
+  // OUT of source
+  const sQty = qty4(Number(src.on_hand_qty) - qty), sVal = money(sQty * avg);
+  const outLed = (await c.query(
+    `INSERT INTO mv_stock_ledger(movement_no, movement_date, item_id, location_id, mv_direction, qty, unit_cost, value_amt,
+         running_balance_qty, running_balance_value, running_avg_cost, source_doc_type, source_doc_id, posted_by, posted_at, site_id, created_by)
+     VALUES($1,$2,$3,$4,'XFER_OUT',$5,$6,$7,$8,$9,$10,'TRF',$11,$12,now(),$13,$12) RETURNING ledger_id`,
+    [await nextNo('MOV', scode, date, c), date, itemId, fromLoc, qty, avg, lineAmt, sQty, sVal, avg, trf.transfer_id, userId, siteId])).rows[0];
+  await upsertBalance(c, itemId, fromLoc, { on_hand_qty: sQty, moving_avg_cost: avg, stock_value: sVal, last_movement_id: outLed.ledger_id }, userId);
+
+  // IN to destination (rolls its moving-average cost)
+  const dst = await balanceOf(c, itemId, toLoc);
+  const dQty = qty4(Number(dst.on_hand_qty) + qty);
+  const dVal = money(Number(dst.stock_value) + lineAmt);
+  const dAvg = avg4(dVal, dQty);
+  const inLed = (await c.query(
+    `INSERT INTO mv_stock_ledger(movement_no, movement_date, item_id, location_id, mv_direction, qty, unit_cost, value_amt,
+         running_balance_qty, running_balance_value, running_avg_cost, source_doc_type, source_doc_id, posted_by, posted_at, site_id, created_by)
+     VALUES($1,$2,$3,$4,'XFER_IN',$5,$6,$7,$8,$9,$10,'TRF',$11,$12,now(),$13,$12) RETURNING ledger_id`,
+    [await nextNo('MOV', scode, date, c), date, itemId, toLoc, qty, avg, lineAmt, dQty, dVal, dAvg, trf.transfer_id, userId, siteId])).rows[0];
+  await upsertBalance(c, itemId, toLoc, { on_hand_qty: dQty, moving_avg_cost: dAvg, stock_value: dVal, last_movement_id: inLed.ledger_id }, userId);
+
+  await c.query(
+    `INSERT INTO txl_transfer(transfer_id, line_no, item_id, uom_id, transfer_qty, received_qty, unit_cost, line_amt, out_ledger_id, in_ledger_id, created_by)
+     VALUES($1,1,$2,$3,$4,$4,$5,$6,$7,$8,$9)`,
+    [trf.transfer_id, itemId, item.base_uom_id, qty, avg, lineAmt, outLed.ledger_id, inLed.ledger_id, userId]);
+
+  return { transfer_id: trf.transfer_id, unit_cost: avg, line_amt: lineAmt, from_on_hand: sQty, to_on_hand: dQty, to_avg_cost: dAvg };
+}
+
+module.exports = { postReceive, postIssue, postCount, postTransfer, balanceOf, siteCodeOf, money, qty4 };

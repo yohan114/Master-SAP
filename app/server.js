@@ -47,6 +47,7 @@ app.get('/api/masters', async (req, res) => {
 });
 app.use('/api/jobcards', require('./routes/jobcards'));
 app.use('/api/stores', require('./routes/stores'));
+app.use('/api/transfers', require('./routes/transfers'));
 app.use('/api/oil', require('./routes/oil'));
 app.use('/api/battery', require('./routes/battery'));
 app.use('/api/mrn', require('./routes/mrn'));

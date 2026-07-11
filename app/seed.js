@@ -4,13 +4,13 @@ const { q, one, tx } = require('./db');
 const { hashPassword } = require('./auth/password');
 
 const PERMS = ['ADMIN.ALL', 'READ.ALL_SITES', 'JOB.WRITE', 'JOB.LABOUR', 'JOB.PARTS', 'JOB.COST', 'JOB.CLOSE',
-  'STORES.RECEIVE', 'STORES.ISSUE', 'STORES.MRN', 'STORES.READ', 'OIL.RECEIVE', 'OIL.ISSUE', 'OIL.COUNT', 'OIL.READ',
+  'STORES.RECEIVE', 'STORES.ISSUE', 'STORES.MRN', 'STORES.TRANSFER', 'STORES.READ', 'OIL.RECEIVE', 'OIL.ISSUE', 'OIL.COUNT', 'OIL.READ',
   'BATTERY.WRITE', 'BATTERY.ISSUE', 'BATTERY.READ'];
 const ROLES = {
   system_admin: ['ADMIN.ALL', 'READ.ALL_SITES'],
   foreman:      ['JOB.WRITE', 'JOB.LABOUR', 'JOB.PARTS', 'JOB.COST', 'JOB.CLOSE', 'STORES.ISSUE', 'STORES.MRN', 'STORES.READ',
                  'OIL.ISSUE', 'OIL.READ', 'BATTERY.ISSUE', 'BATTERY.READ'],
-  storekeeper:  ['STORES.RECEIVE', 'STORES.ISSUE', 'STORES.MRN', 'STORES.READ', 'OIL.RECEIVE', 'OIL.ISSUE', 'OIL.COUNT', 'OIL.READ',
+  storekeeper:  ['STORES.RECEIVE', 'STORES.ISSUE', 'STORES.MRN', 'STORES.TRANSFER', 'STORES.READ', 'OIL.RECEIVE', 'OIL.ISSUE', 'OIL.COUNT', 'OIL.READ',
                  'BATTERY.WRITE', 'BATTERY.ISSUE', 'BATTERY.READ'],
   viewer:       [],
 };
@@ -69,6 +69,10 @@ const USERS = [
       ON CONFLICT DO NOTHING RETURNING location_id`, [CB]))[0]
       || (await run("SELECT location_id FROM md_location WHERE location_code='HQ'"))[0];
     const siteId = site.location_id;
+
+    // a second stock location under the HQ site, so material transfers have a destination
+    await run(`INSERT INTO md_location(location_code, location_name, location_type, site_code, created_by)
+      VALUES('ST2','Sub-Store Yard','STORE','HQ',$1) ON CONFLICT DO NOTHING`, [CB]);
 
     const uom = (await run(`INSERT INTO md_uom(uom_code, uom_name, created_by) VALUES('NOS','Numbers',$1)
       ON CONFLICT (uom_code) DO NOTHING RETURNING uom_id`, [CB]))[0]

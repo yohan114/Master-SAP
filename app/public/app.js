@@ -92,16 +92,31 @@ async function stores() {
   const v = $('#view'); v.innerHTML = '';
   const stock = (await api('/api/stores/stock')).rows;
   const items = (await api('/api/stores/items')).rows;
+  const xfers = (await api('/api/transfers')).rows;
   if (can('STORES.RECEIVE')) $('#topActions').append(btn('+ Receive', () => receiveForm(items, 'stores')));
   if (can('STORES.ISSUE')) $('#topActions').append(btn('Issue', () => issueForm(items, 'stores')));
-  v.append(card(`On‑hand stock (${stock.length})`, table([
-    { h: 'Item No', k: 'item_no' }, { h: 'Item', k: 'item_name' },
+  if (can('STORES.TRANSFER')) $('#topActions').append(btn('Transfer', () => transferForm(items)));
+  v.append(card(`On‑hand stock by location (${stock.length})`, table([
+    { h: 'Item No', k: 'item_no' }, { h: 'Item', k: 'item_name' }, { h: 'Location', k: 'location_code' },
     { h: 'On hand', n: true, r: (r) => int(r.on_hand_qty) }, { h: 'Avg cost', n: true, r: (r) => money(r.moving_avg_cost) },
     { h: 'Value', n: true, r: (r) => money(r.stock_value) },
   ], stock)));
+  v.append(card(`Recent transfers (${xfers.length})`, table([
+    { h: 'Transfer No', k: 'transfer_no' }, { h: 'Date', k: 'transfer_date' },
+    { h: 'From', k: 'from_name' }, { h: 'To', k: 'to_name' },
+    { h: 'Value', n: true, r: (r) => money(r.total_amt) }, { h: 'Status', r: (r) => statusPill(r.doc_status) },
+  ], xfers)));
   v.append(card(`Item master (showing ${items.length})`, table([
     { h: 'Item No', k: 'item_no' }, { h: 'Item', k: 'item_name' }, { h: 'Type', k: 'item_type' },
   ], items)));
+}
+function transferForm(items) {
+  formModal('Transfer stock between locations', [
+    { k: 'item_id', l: 'Item', sel: opt(items, 'item_id', 'item_name') },
+    { k: 'from_location_id', l: 'From location', sel: opt(M.locations, 'location_id', 'location_name') },
+    { k: 'to_location_id', l: 'To location', sel: opt(M.locations, 'location_id', 'location_name') },
+    { k: 'qty', l: 'Quantity', type: 'number' },
+  ], async (d) => { await api('/api/transfers', { method: 'POST', body: JSON.stringify(d) }); toast('Stock transferred'); route('stores'); });
 }
 
 /* ---------- requisitions (MRN) ---------- */

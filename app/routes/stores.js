@@ -20,12 +20,12 @@ router.get('/items', async (req, res) => {
 router.get('/stock', async (req, res) => {
   try {
     const sc = scopeSql(req, 'l', 1);
-    const rows = await q(`SELECT b.item_id, i.item_no, i.item_name, b.location_id,
+    const rows = await q(`SELECT b.item_id, i.item_no, i.item_name, b.location_id, l.location_code,
         b.on_hand_qty, b.moving_avg_cost, b.stock_value
       FROM inv_stock_balance b JOIN md_item i ON i.item_id=b.item_id
       JOIN md_location l ON l.location_id=b.location_id
       WHERE b.on_hand_qty <> 0 AND i.item_type <> 'LUBRICANT'
-      ${sc.sql} ORDER BY i.item_no`, sc.params);
+      ${sc.sql} ORDER BY i.item_no, l.location_code`, sc.params);
     res.json({ count: rows.length, rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
