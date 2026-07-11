@@ -10,7 +10,8 @@ const today = () => new Date().toISOString().slice(0, 10);
 
 router.get('/items', async (req, res) => {
   try {
-    const rows = await q(`SELECT item_id, item_no, item_name, item_type, base_uom_id FROM md_item
+    const rows = await q(`SELECT item_id, item_no, item_name, item_type, base_uom_id, is_stockable,
+        reorder_level, min_qty FROM md_item
       WHERE is_active AND item_type <> 'LUBRICANT' ORDER BY item_no LIMIT 500`);
     res.json({ count: rows.length, rows });
   } catch (e) { res.status(500).json({ error: e.message }); }

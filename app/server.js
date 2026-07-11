@@ -40,6 +40,8 @@ app.get('/api/masters', async (req, res) => {
       locations: await q("SELECT location_id, location_code, location_name FROM md_location WHERE is_active ORDER BY location_code"),
       assets: await q("SELECT asset_id, asset_no, asset_name, asset_class FROM md_asset WHERE is_active ORDER BY asset_no LIMIT 1000"),
       employees: await q("SELECT employee_id, employee_no, employee_name FROM md_employee WHERE is_active AND is_technician ORDER BY employee_no"),
+      uoms: await q("SELECT uom_id, uom_code, uom_name FROM md_uom WHERE is_active ORDER BY uom_code"),
+      categories: await q("SELECT category_id, category_code, category_name FROM md_item_category WHERE is_active ORDER BY category_name"),
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

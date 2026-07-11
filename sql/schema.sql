@@ -797,7 +797,13 @@ CREATE TABLE txl_mrn (
     mrn_line_id  BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     mrn_id       BIGINT NOT NULL REFERENCES tx_mrn(mrn_id),
     line_no      SMALLINT NOT NULL,
-    item_id      BIGINT NOT NULL REFERENCES md_item(item_id),
+    item_source  VARCHAR(10) NOT NULL DEFAULT 'GENERAL',   -- GENERAL (from master) | OTHER (typed)
+    item_id      BIGINT REFERENCES md_item(item_id),       -- GENERAL only: a stockable master item
+    item_description      VARCHAR(200),                     -- OTHER only: free-text description
+    request_reason        VARCHAR(300),                     -- OTHER: why it's off-catalogue (required)
+    suggested_category_id BIGINT REFERENCES md_item_category(category_id),  -- OTHER: helps buyer/promotion
+    est_unit_price        NUMERIC(18,4),                    -- OTHER: optional, aids approval threshold
+    promoted_item_id      BIGINT REFERENCES md_item(item_id),  -- OTHER: set if later added to the master
     uom_id       BIGINT NOT NULL REFERENCES md_uom(uom_id),
     requested_qty NUMERIC(18,4) NOT NULL,
     approved_qty  NUMERIC(18,4) NOT NULL DEFAULT 0,
@@ -811,7 +817,12 @@ CREATE TABLE txl_mrn (
     updated_at TIMESTAMPTZ,
     row_version INTEGER    NOT NULL DEFAULT 1,
     is_active  BOOLEAN     NOT NULL DEFAULT TRUE,
-    CONSTRAINT uq_txl_mrn_line UNIQUE (mrn_id, line_no)
+    CONSTRAINT uq_txl_mrn_line UNIQUE (mrn_id, line_no),
+    -- The two-mode contract: a line is EITHER a master item OR a typed one, never both.
+    CONSTRAINT ck_txl_mrn_source CHECK (
+        (item_source = 'GENERAL' AND item_id IS NOT NULL AND item_description IS NULL)
+     OR (item_source = 'OTHER'   AND item_id IS NULL AND item_description IS NOT NULL AND request_reason IS NOT NULL)
+    )
 );
 
 CREATE TABLE tx_po (

@@ -8,7 +8,7 @@ used to be separate apps and Excel books run as **modules of a single master sys
 wired together so a stock or oil issue flows straight into a workshop job's final cost.
 
 > Status: the backend of all four domains + a unified web UI + a one‑command deploy kit are **built and
-> tested** (`app/`, 37/37 end‑to‑end), running on the **real migrated data** (2,825 items · 414 fleet
+> tested** (`app/`, 43/43 end‑to‑end), running on the **real migrated data** (2,825 items · 414 fleet
 > assets · 37 batteries · **LKR 13.09M opening stock**). See [`BUILD_BACKLOG.md`](BUILD_BACKLOG.md).
 
 ---
@@ -40,14 +40,14 @@ cd app && npm install
 export DB_ENGINE=sqlite SQLITE_DB=./umms.sqlite
 node init-db.js              # loads sql/schema.sqlite.sql into a fresh file
 npm run seed && npm start    # http://localhost:4000  (login: admin / ChangeMe@Admin1)
-npm run smoke                # 37/37 end-to-end
+npm run smoke                # 43/43 end-to-end
 
 # --- PostgreSQL (server / VPS) ---
 createdb umms && psql -d umms -f sql/schema.sql
 cd app && npm install
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=umms
 npm run seed && npm start    # http://localhost:4000
-npm run smoke                # 37/37 end-to-end
+npm run smoke                # 43/43 end-to-end
 ```
 Load your real data (from a machine with the legacy SQLite books):
 ```bash
@@ -85,6 +85,7 @@ The application implements this design. Start with the Design Contract.
 | 11 | [Integration & Future‑Readiness](docs/11-integration.md) | Excel, barcode/QR, notifications, API, BI, optional SAP. |
 | 12 | [Roadmap, Appendices & Risks](docs/12-roadmap-appendices-risks.md) | Phase plan, menus, numbering, alerts, risk register. |
 | 13 | [Auth & RBAC Design](docs/13-auth-rbac-design.md) | Login, hashing, sessions, permission middleware, site scoping. |
+| 14 | [Material Request — General vs Other items](docs/14-material-request-item-selection.md) | Two‑mode request lines: master‑list general (stock‑controlled) vs typed non‑stock items. |
 
 ---
 

@@ -116,39 +116,67 @@ async function mrn() {
   ], rows, { click: (r) => openMrn(r.mrn_id) })));
 }
 async function newMrnForm() {
-  const items = (await api('/api/stores/items')).rows;
+  const items = (await api('/api/stores/items')).rows.filter((i) => i.is_stockable);   // general = stockable master items
   const jobs = (await api('/api/jobcards')).rows;
-  const itemOpts = `<option value="">— item —</option>` + opt(items, 'item_id', 'item_name');
-  const lineRow = () => `<div class="row mrn-line" style="gap:8px;margin-bottom:8px">
-      <select name="item" style="flex:3">${itemOpts}</select>
-      <input name="qty" type="number" placeholder="Qty" style="flex:1" min="0" step="any">
-      <button type="button" class="btn" data-del>✕</button></div>`;
-  const ov = h(`<div id="login" style="background:rgba(10,14,20,.55)"><form class="login-card" style="max-width:560px">
+  const itemOpts = `<option value="">— select stock item —</option>` +
+    items.map((i) => `<option value="${i.item_id}">${esc(i.item_no + ' · ' + i.item_name)}</option>`).join('');
+  const uomOpts = `<option value="">— unit —</option>` + opt(M.uoms || [], 'uom_id', 'uom_code');
+  const catOpts = `<option value="">— category (optional) —</option>` + opt(M.categories || [], 'category_id', 'category_name');
+  const lineRow = () => `<div class="mrn-line" style="border:1px solid var(--line);border-radius:8px;padding:10px;margin-bottom:10px">
+      <div class="row" style="gap:8px;align-items:center">
+        <select name="src" style="flex:0 0 120px"><option value="GENERAL">General</option><option value="OTHER">Other</option></select>
+        <span class="gen" style="flex:1"><select name="item" style="width:100%">${itemOpts}</select></span>
+        <span class="oth" style="flex:1;display:none"><input name="desc" placeholder="Describe the item" style="width:100%"></span>
+        <input name="qty" type="number" placeholder="Qty" style="flex:0 0 74px" min="0" step="any">
+        <button type="button" class="btn" data-del>✕</button>
+      </div>
+      <div class="oth" style="display:none;margin-top:8px">
+        <div class="row" style="gap:8px"><select name="uom" style="flex:1">${uomOpts}</select><select name="cat" style="flex:1">${catOpts}</select></div>
+        <input name="reason" placeholder="Reason — why it's not a stock item (required)" style="width:100%;margin-top:8px">
+      </div></div>`;
+  const ov = h(`<div id="login" style="background:rgba(10,14,20,.55)"><form class="login-card" style="width:min(640px,94vw)">
     <div class="brand-row"><h1 style="font-size:16px">New requisition (MRN)</h1></div>
     <label>Requesting store</label><select name="location_id">${opt(M.locations, 'location_id', 'location_name')}</select>
     <label>Against job card (optional)</label><select name="jobcard_id"><option value="">— none —</option>${opt(jobs, 'jobcard_id', 'jobcard_no')}</select>
-    <label>Items requested</label><div id="mrnLines">${lineRow()}${lineRow()}</div>
+    <label>Items requested <span class="muted" style="font-weight:400">— General = pick from stock list · Other = type manually</span></label>
+    <div id="mrnLines">${lineRow()}${lineRow()}</div>
     <button type="button" class="btn sm" data-add>+ add line</button>
     <div class="row" style="margin-top:20px"><button class="btn primary" type="submit" style="flex:1">Raise MRN</button><button type="button" class="btn" data-x>Cancel</button></div>
     <div class="err"></div></form></div>`);
   document.body.append(ov);
   const form = ov.querySelector('form'); const lines = ov.querySelector('#mrnLines');
+  const sync = (row) => { const other = row.querySelector('[name=src]').value === 'OTHER';
+    row.querySelectorAll('.gen').forEach((el) => (el.style.display = other ? 'none' : ''));
+    row.querySelectorAll('.oth').forEach((el) => (el.style.display = other ? '' : 'none')); };
   ov.querySelector('[data-x]').onclick = () => ov.remove();
-  ov.querySelector('[data-add]').onclick = () => lines.append(h(lineRow()));
+  ov.querySelector('[data-add]').onclick = () => { const r = h(lineRow()); lines.append(r); sync(r); };
+  lines.addEventListener('change', (e) => { if (e.target.name === 'src') sync(e.target.closest('.mrn-line')); });
   lines.addEventListener('click', (e) => { const d = e.target.closest('[data-del]'); if (d && lines.children.length > 1) d.closest('.mrn-line').remove(); });
   form.addEventListener('submit', async (e) => {
     e.preventDefault();
     const body = {
       location_id: form.querySelector('[name=location_id]').value,
       jobcard_id: form.querySelector('[name=jobcard_id]').value || null,
-      lines: [...lines.querySelectorAll('.mrn-line')].map((r) => ({
-        item_id: r.querySelector('[name=item]').value, qty: Number(r.querySelector('[name=qty]').value),
-      })).filter((x) => x.item_id && x.qty > 0),
+      lines: [...lines.querySelectorAll('.mrn-line')].map((r) => {
+        const qty = Number(r.querySelector('[name=qty]').value);
+        if (r.querySelector('[name=src]').value === 'OTHER') return {
+          item_source: 'OTHER', description: r.querySelector('[name=desc]').value.trim(), qty,
+          uom_id: r.querySelector('[name=uom]').value || null, reason: r.querySelector('[name=reason]').value.trim(),
+          suggested_category_id: r.querySelector('[name=cat]').value || null };
+        return { item_source: 'GENERAL', item_id: r.querySelector('[name=item]').value, qty };
+      }).filter((x) => x.qty > 0 && (x.item_id || x.description)),
     };
     if (!body.lines.length) { form.querySelector('.err').textContent = 'Add at least one item with a quantity.'; return; }
     try { const r = await api('/api/mrn', { method: 'POST', body: JSON.stringify(body) }); ov.remove(); toast('MRN ' + r.mrn_no + ' raised'); openMrn(r.mrn_id); }
     catch (err) { form.querySelector('.err').textContent = err.message; }
   });
+}
+function mrnAvail(r) {
+  if (r.item_source !== 'GENERAL') return '<span class="muted">— n/a —</span>';
+  const oh = Number(r.on_hand_qty) || 0, req = Number(r.requested_qty) || 0;
+  const floor = Math.max(Number(r.min_qty) || 0, Number(r.reorder_level) || 0);
+  const cls = oh <= 0 ? 'p-block' : oh < req ? 'p-build' : oh <= floor ? 'p-idle' : 'p-live';
+  return `<span class="pill ${cls}">${int(oh)} avail</span>`;
 }
 async function openMrn(id) {
   const m = await api('/api/mrn/' + id);
@@ -158,16 +186,22 @@ async function openMrn(id) {
     bar.append(btnP('Approve', async () => { try { await api(`/api/mrn/${id}/approve`, { method: 'POST', body: '{}' }); toast('MRN approved'); openMrn(id); } catch (e) { toast(e.message, true); } }));
   if (can('STORES.ISSUE') && ['APPROVED', 'PARTIAL'].includes(m.doc_status))
     bar.append(btnP('Fulfil from stock', async () => { try { const r = await api(`/api/mrn/${id}/fulfil`, { method: 'POST', body: '{}' }); toast('Fulfilled → ' + r.doc_status.toLowerCase()); openMrn(id); } catch (e) { toast(e.message, true); } }));
+  const other = (m.lines || []).filter((l) => l.item_source === 'OTHER').length;
   const info = h(`<div class="row" style="margin-bottom:6px">
     <div><div class="crumb">Requesting store</div><b>${esc(m.location_name)}</b></div>
     <div><div class="crumb">Status</div>${statusPill(m.doc_status)}</div>
-    <div><div class="crumb">Job card</div><b>${m.jobcard_id ? '#' + esc(m.jobcard_id) : '—'}</b></div></div>`);
+    <div><div class="crumb">Job card</div><b>${m.jobcard_id ? '#' + esc(m.jobcard_id) : '—'}</b></div>
+    <div><div class="crumb">Other items</div><b>${other}</b></div></div>`);
   const wrap = document.createElement('div'); wrap.append(info, bar);
   v.append(card(esc(m.mrn_no), wrap));
   v.append(card('Lines', table([
-    { h: 'Item', r: (r) => esc(`${r.item_no} · ${r.item_name}`) },
-    { h: 'Requested', n: true, r: (r) => int(r.requested_qty) }, { h: 'Approved', n: true, r: (r) => int(r.approved_qty) },
-    { h: 'Issued', n: true, r: (r) => int(r.issued_qty) }, { h: 'On hand', n: true, r: (r) => int(r.on_hand_qty) },
+    { h: 'Type', r: (r) => `<span class="pill ${r.item_source === 'OTHER' ? 'p-idle' : 'p-ready'}">${r.item_source === 'OTHER' ? 'other' : 'general'}</span>` },
+    { h: 'Item', r: (r) => r.item_source === 'OTHER'
+        ? `✎ ${esc(r.item_description)}${r.request_reason ? `<div class="muted" style="font-size:11px">${esc(r.request_reason)}</div>` : ''}`
+        : esc(`${r.item_no} · ${r.item_name}`) },
+    { h: 'Req', n: true, r: (r) => `${int(r.requested_qty)} ${esc(r.uom_code || '')}` },
+    { h: 'Appr', n: true, r: (r) => int(r.approved_qty) }, { h: 'Issued', n: true, r: (r) => int(r.issued_qty) },
+    { h: 'Availability', r: mrnAvail },
     { h: 'Line', r: (r) => statusPill(r.line_status) },
   ], m.lines)));
 }

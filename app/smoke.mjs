@@ -27,7 +27,8 @@ const ids = (await q(`SELECT
   (SELECT item_id FROM md_item WHERE item_no='LB-0001') lube,
   (SELECT item_id FROM md_item WHERE item_no='BT-0001') batmodel,
   (SELECT asset_id FROM md_asset WHERE asset_no='VEH-0002') asset2,
-  (SELECT employee_id FROM md_employee WHERE employee_no='EMP-0001') tech`))[0];
+  (SELECT employee_id FROM md_employee WHERE employee_no='EMP-0001') tech,
+  (SELECT uom_id FROM md_uom WHERE uom_code='NOS') uom`))[0];
 
 console.log('AUTH + RBAC');
 const admin = await login('admin', 'ChangeMe@Admin1');
@@ -138,6 +139,28 @@ A('fulfil -> CLOSED, line issued 5 at MWAC',
 const mrnGot = await api(`/api/mrn/${mrnId}`, admin.cookie);
 A('MRN line shows issued 5; the fulfilling issue dropped stock 17 -> 12',
   Number(mrnGot.body.lines[0].issued_qty) === 5 && Number(mrnGot.body.lines[0].on_hand_qty) === 12, mrnGot.body.lines?.[0]);
+
+console.log('\nMRN — General vs Other items (stock control on general only; spare now 12)');
+A('typing an item that exists in the master as "Other" is blocked',
+  (await api('/api/mrn', foreman.cookie, 'POST', { location_id: ids.site,
+    lines: [{ item_source: 'OTHER', description: 'Brake Pad Set', qty: 1, uom_id: ids.uom, reason: 'x' }] })).status === 400);
+A('other item without a reason -> 400',
+  (await api('/api/mrn', foreman.cookie, 'POST', { location_id: ids.site,
+    lines: [{ item_source: 'OTHER', description: 'Special seal kit XYZ', qty: 1, uom_id: ids.uom }] })).status === 400);
+const mixed = await api('/api/mrn', foreman.cookie, 'POST', { location_id: ids.site, lines: [
+  { item_source: 'GENERAL', item_id: ids.spare, qty: 2 },
+  { item_source: 'OTHER', description: 'Special seal kit XYZ', qty: 1, uom_id: ids.uom, reason: 'off-catalogue one-time' }] });
+A('raise mixed MRN (1 general + 1 other)', mixed.status === 200 && mixed.body.lines === 2 && mixed.body.other_lines === 1, mixed.body);
+const mixId = mixed.body.mrn_id;
+await api(`/api/mrn/${mixId}/approve`, foreman.cookie, 'POST', {});
+const mf = await api(`/api/mrn/${mixId}/fulfil`, foreman.cookie, 'POST', {});
+A('fulfil issues the general line only; the other line waits for purchase -> PARTIAL', mf.body.doc_status === 'PARTIAL', mf.body);
+const mg = await api(`/api/mrn/${mixId}`, admin.cookie);
+const gLine = (mg.body.lines || []).find((l) => l.item_source === 'GENERAL');
+const oLine = (mg.body.lines || []).find((l) => l.item_source === 'OTHER');
+A('general line issued 2 (stock 12 -> 10), CLOSED', Number(gLine.issued_qty) === 2 && Number(gLine.on_hand_qty) === 10 && gLine.line_status === 'CLOSED', gLine);
+A('other line bypassed stock: typed desc + reason, no item_id, PENDING_PO',
+  oLine.item_id == null && oLine.item_description === 'Special seal kit XYZ' && !!oLine.request_reason && oLine.line_status === 'PENDING_PO', oLine);
 
 await end();
 console.log(`\n${pass} passed, ${fail} failed`);
