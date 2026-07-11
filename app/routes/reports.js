@@ -10,7 +10,7 @@ const router = express.Router();
 // col: { k: field, h: header, n: numeric (right-align / money) }
 const REPORTS = {
   'stock-ledger': {
-    title: 'Stock ledger (movement history)', desc: 'Every stock movement — receipts, issues, transfers, adjustments.', dated: true, scope: 'g',
+    title: 'Stock ledger (movement history)', desc: 'Every stock movement — receipts, issues, transfers, adjustments.', dated: true, scope: 'g', chart: true,
     columns: [{ k: 'movement_no', h: 'Movement' }, { k: 'movement_date', h: 'Date' }, { k: 'item_no', h: 'Item No' }, { k: 'item_name', h: 'Item' },
       { k: 'location_code', h: 'Loc' }, { k: 'mv_direction', h: 'Dir' }, { k: 'qty', h: 'Qty', n: true }, { k: 'unit_cost', h: 'Unit', n: true },
       { k: 'value_amt', h: 'Value', n: true }, { k: 'running_balance_qty', h: 'Balance', n: true }, { k: 'source_doc_type', h: 'Doc' }],
@@ -55,7 +55,7 @@ const REPORTS = {
       WHERE g.grn_date BETWEEN $1 AND $2${sc} GROUP BY s.supplier_no, s.supplier_name ORDER BY total_received DESC`,
   },
   'job-costing': {
-    title: 'Job costing sheet', desc: 'Cost breakdown per job — material, labour, general, outside, total and variance.', dated: true, scope: 'cs',
+    title: 'Job costing sheet', desc: 'Cost breakdown per job — material, labour, general, outside, total and variance.', dated: true, scope: 'cs', chart: true,
     columns: [{ k: 'jobcard_no', h: 'Job No' }, { k: 'asset_no', h: 'Asset' }, { k: 'jobcard_status', h: 'Status' },
       { k: 'material_cost', h: 'Material', n: true }, { k: 'labour_cost', h: 'Labour', n: true }, { k: 'general_cost', h: 'General', n: true },
       { k: 'outside_repair_cost', h: 'Outside', n: true }, { k: 'total_job_cost', h: 'Total', n: true }, { k: 'estimated_cost', h: 'Est.', n: true }, { k: 'variance_amt', h: 'Variance', n: true }],
@@ -122,9 +122,75 @@ const REPORTS = {
   },
 };
 
+// ---- Chart views (?format=chart) ------------------------------------------
+// Each builder returns a Chart.js config ({ type, data, options }) plus a `meta` block the web UI uses
+// (available items, the reorder threshold, …). The JSON is a valid Chart.js config, so any Chart.js
+// consumer — the web app, SAP, a BI tool — can render it directly.
+const numv = (v) => Number(v) || 0;
+const CHARTS = {
+  // Line: on-hand (ledger running balance) over time for one item, with a reorder-level threshold line.
+  'stock-ledger': async (req) => {
+    const from = req.query.from || '1900-01-01', to = req.query.to || '2999-12-31';
+    const s1 = scopeSql(req, 'g', 3);
+    const items = await q(
+      `SELECT DISTINCT i.item_no, i.item_name FROM mv_stock_ledger g JOIN md_item i ON i.item_id=g.item_id
+       WHERE g.movement_date BETWEEN $1 AND $2${s1.sql} ORDER BY i.item_no`, [from, to, ...s1.params]);
+    let itemNo = req.query.item;
+    if (!itemNo || !items.some((x) => x.item_no === itemNo)) {   // default: the most-moved item in range
+      const s0 = scopeSql(req, 'g', 3);
+      const top = await q(`SELECT i.item_no FROM mv_stock_ledger g JOIN md_item i ON i.item_id=g.item_id
+        WHERE g.movement_date BETWEEN $1 AND $2${s0.sql} GROUP BY i.item_no ORDER BY COUNT(*) DESC LIMIT 1`, [from, to, ...s0.params]);
+      itemNo = (top[0] && top[0].item_no) || (items[0] && items[0].item_no) || null;
+    }
+    const meta = { report: 'stock-ledger', item_no: itemNo, items };
+    if (!itemNo) return { type: 'line', data: { labels: [], datasets: [] }, options: {}, meta };
+    const s2 = scopeSql(req, 'g', 4);
+    const rows = await q(
+      `SELECT g.movement_date, g.running_balance_qty FROM mv_stock_ledger g JOIN md_item i ON i.item_id=g.item_id
+       WHERE i.item_no=$3 AND g.movement_date BETWEEN $1 AND $2${s2.sql} ORDER BY g.ledger_id`, [from, to, itemNo, ...s2.params]);
+    const info = (await q('SELECT item_name, reorder_level FROM md_item WHERE item_no=$1', [itemNo]))[0] || {};
+    const reorder = numv(info.reorder_level);
+    const labels = rows.map((r) => String(r.movement_date));
+    meta.item_name = info.item_name; meta.reorder_level = reorder;
+    return {
+      type: 'line',
+      data: { labels, datasets: [
+        { label: `On hand — ${itemNo}`, data: rows.map((r) => numv(r.running_balance_qty)), borderColor: '#d9820a', backgroundColor: 'rgba(217,130,10,0.12)', fill: true, tension: 0.2, pointRadius: 2, borderWidth: 2 },
+        { label: `Reorder level (${reorder})`, data: labels.map(() => reorder), borderColor: '#c24a42', borderDash: [6, 4], pointRadius: 0, fill: false, borderWidth: 1.5 },
+      ] },
+      options: { responsive: true, maintainAspectRatio: false, interaction: { mode: 'index', intersect: false },
+        plugins: { legend: { display: true }, title: { display: true, text: `Stock on hand over time — ${itemNo}${info.item_name ? ' · ' + info.item_name : ''}` } },
+        scales: { y: { beginAtZero: true, title: { display: true, text: 'Qty on hand' } }, x: { title: { display: true, text: 'Movement date' } } } },
+      meta,
+    };
+  },
+  // Grouped bar: labour vs parts vs outside-repair per closed job card.
+  'job-costing': async (req) => {
+    const from = req.query.from || '1900-01-01', to = req.query.to || '2999-12-31';
+    const sc = scopeSql(req, 'cs', 3);
+    const rows = await q(
+      `SELECT jc.jobcard_no, cs.labour_cost, cs.material_cost, cs.general_cost, cs.outside_repair_cost
+       FROM cost_job_summary cs JOIN tx_jobcard jc ON jc.jobcard_id=cs.jobcard_id
+       WHERE jc.jobcard_status='CLOSED' AND jc.jobcard_date BETWEEN $1 AND $2${sc.sql}
+       ORDER BY cs.summary_id DESC LIMIT 50`, [from, to, ...sc.params]);
+    return {
+      type: 'bar',
+      data: { labels: rows.map((r) => r.jobcard_no), datasets: [
+        { label: 'Labour', data: rows.map((r) => numv(r.labour_cost)), backgroundColor: '#2f74c0' },
+        { label: 'Parts', data: rows.map((r) => numv(r.material_cost) + numv(r.general_cost)), backgroundColor: '#d9820a' },
+        { label: 'Outside repair', data: rows.map((r) => numv(r.outside_repair_cost)), backgroundColor: '#1f9d63' },
+      ] },
+      options: { responsive: true, maintainAspectRatio: false,
+        plugins: { legend: { display: true }, title: { display: true, text: 'Closed job costs — labour vs parts vs outside repair' } },
+        scales: { y: { beginAtZero: true, title: { display: true, text: 'Cost (LKR)' } }, x: { title: { display: true, text: 'Job card' } } } },
+      meta: { report: 'job-costing', count: rows.length },
+    };
+  },
+};
+
 // Catalogue.
 router.get('/', (req, res) => {
-  res.json({ reports: Object.entries(REPORTS).map(([key, d]) => ({ key, title: d.title, desc: d.desc, dated: !!d.dated })) });
+  res.json({ reports: Object.entries(REPORTS).map(([key, d]) => ({ key, title: d.title, desc: d.desc, dated: !!d.dated, chart: !!d.chart })) });
 });
 
 // Run one report → { title, columns, rows }.
@@ -132,6 +198,11 @@ router.get('/:key', async (req, res) => {
   try {
     const def = REPORTS[req.params.key];
     if (!def) return res.status(404).json({ error: 'Unknown report' });
+    if (req.query.format === 'chart') {
+      const builder = CHARTS[req.params.key];
+      if (!builder) return res.status(400).json({ error: 'This report has no chart view.' });
+      return res.json(await builder(req));
+    }
     const params = [];
     let startIdx = 1;
     if (def.dated) { params.push(req.query.from || '1900-01-01', req.query.to || '2999-12-31'); startIdx = 3; }

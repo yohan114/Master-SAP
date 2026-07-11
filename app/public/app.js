@@ -145,7 +145,8 @@ function animateCount(el, x, dur = 800) {
   };
   requestAnimationFrame(step);
 }
-// 7-day net stock-movement sparkline as inline SVG (Chart.js isn't in this project; zero deps).
+// 7-day net stock-movement sparkline as inline SVG — kept zero-dep for this tiny widget (the report
+// charts use the vendored Chart.js; a full chart lib is overkill for a one-line sparkline).
 function sparkline(trend) {
   const W = 720, H = 96, pad = 10;
   const vals = trend.map((t) => Number(t.net) || 0);
@@ -712,15 +713,58 @@ async function runReport(def, main, range) {
   try { rep = await api(`/api/reports/${def.key}${qs}`); } catch (e) { main.innerHTML = `<div class="card"><div class="card-b" style="color:var(--block)">${esc(e.message)}</div></div>`; return; }
   const cols = rep.columns.map((c) => ({ h: c.h, k: c.k, n: c.n, r: c.n ? (row) => repNum(row[c.k]) : undefined }));
   main.innerHTML = '';
-  const head = h(`<div class="row" style="margin-bottom:14px;align-items:flex-end;flex-wrap:wrap;gap:10px">
+  const head = h(`<div class="row report-head" style="margin-bottom:14px;align-items:flex-end;flex-wrap:wrap;gap:10px">
     <div style="flex:1"><div class="crumb">${esc(rep.title)}</div><b>${rep.rows.length} row(s)</b></div>
     ${def.dated ? `<div><label style="margin:0 0 4px">From</label><input type="date" id="repFrom" value="${from === '1900-01-01' ? '' : from}" style="width:148px"></div>
     <div><label style="margin:0 0 4px">To</label><input type="date" id="repTo" value="${to === '2999-12-31' ? '' : to}" style="width:148px"></div>
     <button class="btn sm" id="repRun">Run</button>` : ''}
+    ${def.chart ? '<button class="btn sm" id="repChart">View chart</button>' : ''}
     <button class="btn sm primary" id="repCsv">Download CSV</button></div>`);
-  main.append(head, card(rep.title, table(cols, rep.rows)));
+  const body = document.createElement('div');
+  main.append(head, body);
+  const showTable = () => { body.innerHTML = ''; body.append(card(rep.title, table(cols, rep.rows))); };
+  showTable();
   if (def.dated) head.querySelector('#repRun').onclick = () => runReport(def, main, { from: $('#repFrom').value || '1900-01-01', to: $('#repTo').value || '2999-12-31' });
   head.querySelector('#repCsv').onclick = () => downloadCsv(rep);
+
+  // inline Chart.js view (chartable reports only)
+  if (def.chart) {
+    let charting = false, chartObj = null, item = null;
+    const tgl = head.querySelector('#repChart');
+    tgl.onclick = async () => {
+      charting = !charting;
+      tgl.textContent = charting ? 'View table' : 'View chart';
+      tgl.classList.toggle('primary', charting);
+      if (chartObj) { chartObj.destroy(); chartObj = null; }
+      if (!charting) return showTable();
+      await renderChart();
+    };
+    async function renderChart() {
+      body.innerHTML = '<p class="muted">Rendering chart…</p>';
+      const cq = `?format=chart${def.dated ? `&from=${from}&to=${to}` : ''}${item ? `&item=${encodeURIComponent(item)}` : ''}`;
+      let cfg;
+      try { cfg = await api(`/api/reports/${def.key}${cq}`); } catch (e) { body.innerHTML = `<div class="card"><div class="card-b" style="color:var(--block)">${esc(e.message)}</div></div>`; return; }
+      body.innerHTML = '';
+      const barEl = h('<div class="row report-chart-bar" style="margin-bottom:10px;align-items:center;gap:10px"></div>');
+      const meta = cfg.meta || {};
+      if (meta.items && meta.items.length) {          // stock-ledger: pick which item to chart
+        barEl.append(h('<span class="muted" style="font-size:12px">Item</span>'));
+        const sel = h(`<select style="max-width:300px">${meta.items.map((it) => `<option value="${esc(it.item_no)}"${it.item_no === meta.item_no ? ' selected' : ''}>${esc(it.item_no + ' · ' + it.item_name)}</option>`).join('')}</select>`);
+        sel.onchange = () => { item = sel.value; renderChart(); };
+        barEl.append(sel);
+      }
+      barEl.append(h('<div style="flex:1"></div>'));
+      const prn = h('<button class="btn sm" id="repPrint">Print chart</button>');
+      prn.onclick = () => window.print();
+      barEl.append(prn);
+      const canvas = h('<canvas></canvas>');
+      const chartWrap = h('<div class="print-chart" style="position:relative;height:420px"></div>');
+      chartWrap.append(canvas);
+      const inner = document.createElement('div'); inner.append(barEl, chartWrap);
+      body.append(card(rep.title + ' — chart', inner));
+      chartObj = new Chart(canvas, { type: cfg.type, data: cfg.data, options: cfg.options });
+    }
+  }
 }
 function downloadCsv(rep) {
   const cell = (s) => { s = String(s ?? ''); return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s; };

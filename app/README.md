@@ -10,10 +10,10 @@ wired together so a stock or oil issue flows straight into a job's final cost.
 - **SQLite** (`DB_ENGINE=sqlite`) — a single local file, zero DB server to run. Schema:
   `sql/schema.sqlite.sql` (generated from the Postgres schema — `node sql/gen-sqlite-schema.js`).
   Great for a laptop trial, a single‑PC install, or matching the legacy SQLite books. The whole
-  suite passes **145/145 on both engines** with the same code (`db.js` translates the handful of
+  suite passes **149/149 on both engines** with the same code (`db.js` translates the handful of
   Postgres‑isms and picks the engine from `DB_ENGINE` / `SQLITE_DB`).
 
-## What works (verified end‑to‑end — `npm run smoke`, 145/145)
+## What works (verified end‑to‑end — `npm run smoke`, 149/149)
 
 **One‑system integration (the point):** receive parts into stores → moving‑average cost rolls forward
 (10@1500 + 10@1700 → **1,600**) → issue to a workshop job → the issue **auto‑posts as a job part** →
@@ -92,6 +92,12 @@ by the live stock balance. All in one app.
   open job cards, job cost variance, battery lifecycle, battery by vehicle, pending pricing, audit trail.
 - Each is **site‑scoped**, **date‑filterable**, and **CSV‑exportable** from the UI. A small registry maps
   a report key → columns + a SQL builder; one runner applies the date range + the caller's site scope.
+- **Inline charts** — `stock-ledger` and `job-costing` accept **`?format=chart`** and return a **Chart.js
+  config JSON** (any Chart.js/BI consumer can render it directly): a line of on‑hand over time with a
+  reorder‑level threshold, and a grouped bar of labour vs parts vs outside‑repair per closed job. In the
+  UI a **View chart** toggle sits beside **Download CSV**; the chart renders with a **vendored, local
+  Chart.js** (`public/vendor/chart.min.js` — no CDN, works offline), and a **Print chart** button prints
+  just the chart via a `@media print` stylesheet that hides the nav/sidebar/controls.
 
 ### Alerts & reorder engine (`routes/alerts.js`)
 - The dashboard **exception board** — one endpoint computes every watch condition and returns grouped,
@@ -206,7 +212,7 @@ export DB_ENGINE=sqlite SQLITE_DB=./umms.sqlite   # one local file
 node init-db.js       # loads sql/schema.sqlite.sql into a fresh file
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 145/145  (start the server first, in another shell)
+npm run smoke         # 149/149  (start the server first, in another shell)
 ```
 
 ### Option B — PostgreSQL
@@ -218,7 +224,7 @@ cd app && npm install
 export PGHOST=127.0.0.1 PGPORT=5432 PGUSER=postgres PGDATABASE=umms   # PG* env, no secrets in code
 npm run seed          # masters + users (admin/ChangeMe@Admin1, foreman/ChangeMe@Fore1, viewer/ChangeMe@View1)
 npm start             # http://localhost:4000  (GET /health, POST /auth/login)
-npm run smoke         # 145/145
+npm run smoke         # 149/149
 ```
 
 The same `migrate-legacy.js` / `backfill-opening.js` work under either engine (prefix `DB_ENGINE=sqlite`

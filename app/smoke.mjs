@@ -299,6 +299,17 @@ A('battery-lifecycle returns the serial event history', bl.rows.length >= 5, bl.
 const aud = await runRep('audit-trail');
 A('audit-trail shows who posted each movement', aud.rows.length > 0 && aud.rows.some((r) => r.posted_by), aud.rows?.[0]);
 A('unknown report -> 404', (await api('/api/reports/does-not-exist', admin.cookie)).status === 404);
+// chart views (?format=chart -> Chart.js config JSON)
+A('report catalogue flags the two chartable reports', cat.filter((r) => r.chart).map((r) => r.key).sort().join() === 'job-costing,stock-ledger', cat.filter((r) => r.chart).map((r) => r.key));
+const ledChart = (await api('/api/reports/stock-ledger?format=chart', admin.cookie)).body;
+A('stock-ledger?format=chart returns a Chart.js line config with a reorder threshold line',
+  ledChart.type === 'line' && ledChart.data.datasets.length === 2 && ledChart.data.datasets[0].data.length > 0
+  && ledChart.data.datasets[1].data.every((v) => v === ledChart.meta.reorder_level) && !!ledChart.meta.item_no && Array.isArray(ledChart.meta.items), { t: ledChart.type, ds: ledChart.data?.datasets?.length });
+const jcChart = (await api('/api/reports/job-costing?format=chart', admin.cookie)).body;
+A('job-costing?format=chart returns a grouped bar (labour / parts / outside) over closed jobs',
+  jcChart.type === 'bar' && jcChart.data.datasets.map((d) => d.label).join() === 'Labour,Parts,Outside repair'
+  && jcChart.data.labels.length >= 1, { t: jcChart.type, labels: jcChart.data?.labels?.length });
+A('a non-chartable report rejects format=chart -> 400', (await api('/api/reports/stock-balance?format=chart', admin.cookie)).status === 400);
 
 console.log('\nALERTS & REORDER ENGINE');
 // force exception conditions: an overdue job, an expired-warranty battery, and a near-empty lubricant
