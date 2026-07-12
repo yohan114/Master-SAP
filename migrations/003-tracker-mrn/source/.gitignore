@@ -1,0 +1,3 @@
+# Operational data — do NOT commit the tracker JSON backup. Keep it local.
+*
+!.gitignore
