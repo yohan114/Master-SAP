@@ -1,0 +1,5 @@
+# Operational data must NOT be committed. Put the source workbook
+# (Job_Record_Requested_and_Cjob.xlsx) here locally — it stays out of git.
+*
+!.gitignore
+!README.md
