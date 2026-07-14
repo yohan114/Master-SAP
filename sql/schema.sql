@@ -866,6 +866,22 @@ CREATE TABLE txl_mrn (
     )
 );
 
+-- Append-only audit of MRN status/action transitions (raise, approve, reject, issue, reverse,
+-- edit, link). One row per move; from_status is NULL for the opening CREATE. Mirrors
+-- hist_jobcard_status (hist_ = immutable history) — the MRN traceability audit spine.
+CREATE TABLE hist_mrn_status (
+    mrn_status_hist_id BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
+    mrn_id       BIGINT NOT NULL REFERENCES tx_mrn(mrn_id),
+    from_status  VARCHAR(15),
+    to_status    VARCHAR(15) NOT NULL,
+    action       VARCHAR(20) NOT NULL,   -- CREATE|SUBMIT|APPROVE|REJECT|ISSUE|REVERSE|EDIT|LINK|CANCEL
+    note         VARCHAR(300),
+    changed_by   BIGINT      NOT NULL REFERENCES sec_user(user_id),
+    changed_at   TIMESTAMPTZ NOT NULL DEFAULT now(),
+    site_id      BIGINT      NOT NULL REFERENCES md_location(location_id)
+);
+CREATE INDEX ix_hist_mrn_status_mrn ON hist_mrn_status(mrn_id, mrn_status_hist_id);
+
 CREATE TABLE tx_po (
     po_id        BIGINT GENERATED ALWAYS AS IDENTITY PRIMARY KEY,
     po_no        VARCHAR(30) NOT NULL,
@@ -1022,6 +1038,7 @@ CREATE TABLE txl_issue (
     batch_no      VARCHAR(40),
     reservation_id BIGINT REFERENCES inv_reservation(reservation_id),
     ledger_id     BIGINT REFERENCES mv_stock_ledger(ledger_id),
+    mrn_line_id   BIGINT REFERENCES txl_mrn(mrn_line_id),   -- traceability: the exact MRN line this issue settles (NULL for non-MRN issues)
     remarks       VARCHAR(200),
     created_by BIGINT      NOT NULL REFERENCES sec_user(user_id),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -1871,6 +1888,18 @@ CREATE INDEX ix_tx_issue_site_date      ON tx_issue (site_id, issue_date);
 CREATE INDEX ix_tx_issue_asset          ON tx_issue (asset_id) WHERE asset_id IS NOT NULL;
 CREATE INDEX ix_tx_transfer_from        ON tx_transfer (from_location_id, transfer_date);
 CREATE INDEX ix_tx_lube_asset           ON tx_lube_issue (asset_id, issue_date);
+
+-- MRN traceability + global search: header worklists (site/date/status/store/asset/job),
+-- line rollups, and the issue<->MRN join that reconstructs MRN -> issue -> ledger.
+CREATE INDEX ix_tx_mrn_site_date        ON tx_mrn (site_id, mrn_date);
+CREATE INDEX ix_tx_mrn_status           ON tx_mrn (doc_status);
+CREATE INDEX ix_tx_mrn_location         ON tx_mrn (location_id);
+CREATE INDEX ix_tx_mrn_asset            ON tx_mrn (asset_id)   WHERE asset_id IS NOT NULL;
+CREATE INDEX ix_tx_mrn_jobcard          ON tx_mrn (jobcard_id) WHERE jobcard_id IS NOT NULL;
+CREATE INDEX ix_txl_mrn_item            ON txl_mrn (item_id);
+CREATE INDEX ix_txl_mrn_status          ON txl_mrn (line_status);
+CREATE INDEX ix_tx_issue_mrn            ON tx_issue (mrn_id)   WHERE mrn_id IS NOT NULL;
+CREATE INDEX ix_txl_issue_mrn_line      ON txl_issue (mrn_line_id) WHERE mrn_line_id IS NOT NULL;
 
 -- Job card worklists + costing joins.
 CREATE INDEX ix_tx_jobcard_asset        ON tx_jobcard (asset_id, jobcard_date);
