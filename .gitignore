@@ -35,6 +35,12 @@ jobs_costing.json
 *.sqlite-shm
 !docs/**/*.csv
 
+# Imported legacy data snapshot — intentionally committed at the repo owner's
+# explicit request (see imported-data/README.md). Overrides the *.csv/*.sqlite
+# ignores above for this directory only.
+!imported-data/
+!imported-data/**
+
 # auth module runtime
 reference/**/auth.db
 reference/**/*.log
