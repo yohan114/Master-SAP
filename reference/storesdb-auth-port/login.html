@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in · Stores</title>
+<style>
+  :root{--bg:#F4F6F8;--surface:#fff;--border:#DCE1E7;--text:#1B2733;--muted:#5C6B7A;--primary:#1F6FEB;--danger:#C0392B;
+        --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;--mono:ui-monospace,Menlo,Consolas,monospace}
+  @media (prefers-color-scheme:dark){:root{--bg:#0E1116;--surface:#161B22;--border:#2A323C;--text:#E6EDF3;--muted:#93A1B0;--primary:#4C8DFF}}
+  *{box-sizing:border-box} body{margin:0;font-family:var(--sans);background:var(--bg);color:var(--text);
+     display:grid;place-items:center;min-height:100vh}
+  .card{background:var(--surface);border:1px solid var(--border);border-radius:14px;box-shadow:0 8px 30px rgba(16,24,40,.12);
+        width:360px;max-width:92vw;padding:28px}
+  .mark{width:40px;height:40px;border-radius:10px;background:var(--primary);color:#fff;display:grid;place-items:center;
+        font-family:var(--mono);font-weight:700;font-size:20px;margin-bottom:14px}
+  h1{font-size:19px;margin:0 0 2px} .sub{color:var(--muted);font-size:13px;margin:0 0 20px}
+  label{display:block;font-size:12px;font-weight:600;color:var(--muted);margin:14px 0 5px}
+  input{width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:var(--bg);color:var(--text);font-size:14px}
+  input:focus{outline:3px solid color-mix(in srgb,var(--primary) 40%,transparent);border-color:var(--primary)}
+  button{width:100%;margin-top:20px;padding:11px;border:0;border-radius:9px;background:var(--primary);color:#fff;
+         font-weight:600;font-size:14px;cursor:pointer}
+  button:disabled{opacity:.6;cursor:default}
+  .err{display:none;margin-top:14px;color:var(--danger);background:color-mix(in srgb,var(--danger) 12%,transparent);
+       border:1px solid var(--danger);border-radius:8px;padding:9px 11px;font-size:13px}
+  .foot{margin-top:16px;color:var(--muted);font-size:11.5px;text-align:center}
+</style>
+</head>
+<body>
+  <form class="card" id="f" autocomplete="on">
+    <div class="mark">S</div>
+    <h1>Sign in</h1>
+    <p class="sub">Stores &amp; Inventory · UMMS</p>
+    <label for="u">Username</label>
+    <input id="u" name="username" autocomplete="username" autofocus required>
+    <label for="p">Password</label>
+    <input id="p" name="password" type="password" autocomplete="current-password" required>
+    <button id="b" type="submit">Sign in</button>
+    <div class="err" id="e"></div>
+    <div class="foot">Contact your administrator if you can’t sign in.</div>
+  </form>
+<script>
+  const f=document.getElementById('f'), e=document.getElementById('e'), b=document.getElementById('b');
+  f.addEventListener('submit', async (ev)=>{
+    ev.preventDefault(); e.style.display='none'; b.disabled=true; b.textContent='Signing in…';
+    try{
+      const r=await fetch('/auth/login',{method:'POST',headers:{'content-type':'application/json'},
+        body:JSON.stringify({username:f.username.value,password:f.password.value})});
+      if(r.ok){ location.href='/item_tracker.html'; return; }
+      const j=await r.json().catch(()=>({}));
+      e.textContent=j.error||'Sign in failed.'; e.style.display='block';
+    }catch(_){ e.textContent='Network error. Try again.'; e.style.display='block'; }
+    b.disabled=false; b.textContent='Sign in';
+  });
+</script>
+</body>
+</html>

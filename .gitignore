@@ -21,8 +21,26 @@ venv/
 
 # Data / migration working files (never commit real operational data)
 /data/
+migration/data/
+out/
+jobs_costing.json
 *.xlsx
 *.xlsb
 *.csv
 *.bak
+*.db
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
 !docs/**/*.csv
+
+# Imported legacy data snapshot — intentionally committed at the repo owner's
+# explicit request (see imported-data/README.md). Overrides the *.csv/*.sqlite
+# ignores above for this directory only.
+!imported-data/
+!imported-data/**
+
+# auth module runtime
+reference/**/auth.db
+reference/**/*.log

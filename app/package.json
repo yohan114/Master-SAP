@@ -1,0 +1,19 @@
+{
+  "name": "umms-app",
+  "version": "0.1.0",
+  "description": "UMMS unified platform — Stores, Oil, Battery, Workshop on one login/DB. Runs on PostgreSQL or SQLite (DB_ENGINE).",
+  "type": "commonjs",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "init": "node init-db.js",
+    "seed": "node seed.js",
+    "smoke": "node smoke.mjs",
+    "gen:sqlite-schema": "node ../sql/gen-sqlite-schema.js"
+  },
+  "dependencies": {
+    "cookie-parser": "^1.4.7",
+    "express": "^4.21.2",
+    "pg": "^8.13.1"
+  }
+}

@@ -1,0 +1,2 @@
+# Generated migration reports contain operational data — keep them out of git.
+*.csv

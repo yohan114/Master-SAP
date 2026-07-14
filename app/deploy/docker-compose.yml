@@ -1,0 +1,55 @@
+# UMMS unified platform — production stack: PostgreSQL + the app + an nginx TLS proxy.
+# From the repo root:
+#   cp app/deploy/.env.example app/deploy/.env    # set DB_PASSWORD
+#   put your cert in app/deploy/certs/ (fullchain.pem + privkey.pem)
+#   docker compose -f app/deploy/docker-compose.yml --env-file app/deploy/.env up -d --build
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: umms
+      POSTGRES_USER: umms
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+    volumes:
+      - umms-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U umms -d umms"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  app:
+    build:
+      context: ../..                       # repo root
+      dockerfile: app/deploy/Dockerfile
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      NODE_ENV: production
+      PORT: "4000"
+      TRUST_PROXY: "1"
+      PGHOST: db
+      PGPORT: "5432"
+      PGUSER: umms
+      PGPASSWORD: ${DB_PASSWORD}
+      PGDATABASE: umms
+    expose:
+      - "4000"
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    depends_on: [app]
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/umms.conf:/etc/nginx/conf.d/default.conf:ro
+      - ./certs:/etc/nginx/certs:ro
+      - ./certbot-webroot:/var/www/certbot:ro
+
+volumes:
+  umms-pgdata:

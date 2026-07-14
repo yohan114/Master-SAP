@@ -1,0 +1,52 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>UMMS — Unified Master Management System</title>
+<link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <!-- login -->
+  <div id="login">
+    <form class="login-card" id="loginForm">
+      <div class="brand-row"><div class="mark"></div>
+        <div><h1>UMMS</h1><div class="sub">Unified Master Management System</div></div></div>
+      <label for="u">Username</label>
+      <input id="u" autocomplete="username" value="admin">
+      <label for="p">Password</label>
+      <input id="p" type="password" autocomplete="current-password" value="ChangeMe@Admin1">
+      <button class="btn primary btn-full" type="submit">Sign in</button>
+      <div class="err" id="loginErr"></div>
+    </form>
+  </div>
+
+  <!-- app -->
+  <div id="app" class="hidden">
+    <aside class="side">
+      <div class="logo"><div class="mark"></div><div><b>UMMS</b><small>Master System</small></div></div>
+      <nav class="nav" id="nav">
+        <a data-view="dashboard" class="active">Dashboard</a>
+        <a data-view="stores">Stores</a>
+        <a data-view="mrn">Requisitions</a>
+        <a data-view="purchase">Purchasing</a>
+        <a data-view="oil">Oil &amp; Lubricant</a>
+        <a data-view="battery">Battery</a>
+        <a data-view="workshop">Workshop</a>
+        <a data-view="reports">Reports</a>
+        <a data-view="admin" id="navAdmin" class="hidden">Admin</a>
+      </nav>
+      <div class="foot"><b id="who">—</b><span id="whoRole" class="muted"></span><br><a id="logout">Sign out</a></div>
+    </aside>
+    <main class="main">
+      <div class="topbar"><div><div class="crumb" id="crumb">Overview</div><h2 id="title">Dashboard</h2></div>
+        <div id="topActions"></div></div>
+      <div id="view"></div>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+  <script src="/vendor/chart.min.js"></script>
+  <script src="/app.js"></script>
+</body>
+</html>

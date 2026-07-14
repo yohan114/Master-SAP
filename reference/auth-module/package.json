@@ -1,0 +1,23 @@
+{
+  "name": "umms-auth-module",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Reference authentication + RBAC module for UMMS (see docs/13-auth-rbac-design.md)",
+  "type": "commonjs",
+  "scripts": {
+    "seed": "node seed.js",
+    "start": "node server.js",
+    "test": "node smoke-test.mjs"
+  },
+  "engines": { "node": ">=22.5" },
+  "dependencies": {
+    "express": "^4.19.2",
+    "cookie-parser": "^1.4.6",
+    "express-rate-limit": "^7.4.0"
+  },
+  "comment_optional": "argon2 + better-sqlite3 are auto-used if installed; otherwise the code falls back to Node's built-in crypto.scrypt and node:sqlite so it runs with zero native builds.",
+  "optionalDependencies": {
+    "argon2": "^0.41.1",
+    "better-sqlite3": "^11.3.0"
+  }
+}

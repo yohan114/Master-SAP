@@ -1,0 +1,1060 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>UMMS — Unified Master Management System · Command Center Prototype</title>
+</head>
+<body>
+<style>
+  /* ============================================================
+     UMMS — Unified Master Management System · Command Center
+     Self-contained prototype. Tokens lifted from docs/09-uiux-design.md
+     ============================================================ */
+  *, *::before, *::after { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+
+  :root {
+    /* --- base semantic tokens (LIGHT is the default definition) --- */
+    --bg:#F4F6F8; --surface:#FFFFFF; --surface-2:#F0F2F5; --surface-3:#E9EDF2;
+    --border:#DCE1E7; --border-strong:#C6CDD6;
+    --text:#1B2733; --text-muted:#5C6B7A; --text-faint:#8996A4;
+    --primary:#1F6FEB; --primary-weak:#E7F0FF; --primary-ink:#0B48A8;
+    --success:#1F9254; --success-weak:#E4F4EB;
+    --warning:#B7791F; --warning-weak:#FBF0DC;
+    --danger:#C0392B;  --danger-weak:#FBE7E4;
+    --info:#2C7BE5;    --info-weak:#E6F0FC;
+    --purple:#7C4DC4;  --purple-weak:#F0E9FB;
+    --teal:#0F8B8D;    --teal-weak:#E0F3F3;
+    --gray:#6B7684;    --gray-weak:#EDEFF2;
+    --focus:#1F6FEB;
+    --shadow-raised:0 1px 2px rgba(16,24,40,.08), 0 1px 3px rgba(16,24,40,.06);
+    --shadow-float:0 8px 24px rgba(16,24,40,.16);
+    /* data-viz slots */
+    --v1:#1F6FEB; --v2:#1F9254; --v3:#B7791F; --v4:#7C4DC4; --v5:#0F8B8D; --v6:#C0392B;
+    --mono:ui-monospace,"SF Mono","JetBrains Mono","Cascadia Code",Menlo,Consolas,monospace;
+    --sans:ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg:#0E1116; --surface:#161B22; --surface-2:#1E252E; --surface-3:#252E39;
+      --border:#2A323C; --border-strong:#3A444F;
+      --text:#E6EDF3; --text-muted:#93A1B0; --text-faint:#6C7A89;
+      --primary:#4C8DFF; --primary-weak:#12233F; --primary-ink:#9CC2FF;
+      --success:#3FB971; --success-weak:#122B1E;
+      --warning:#E3A008; --warning-weak:#33290A;
+      --danger:#F0533F;  --danger-weak:#341613;
+      --info:#5AA2FF;    --info-weak:#122238;
+      --purple:#A882E8;  --purple-weak:#241834;
+      --teal:#3CC7C9;    --teal-weak:#0C2B2C;
+      --gray:#8B96A4;    --gray-weak:#20272F;
+      --focus:#4C8DFF;
+      --shadow-raised:0 1px 2px rgba(0,0,0,.4);
+      --shadow-float:0 10px 30px rgba(0,0,0,.5);
+      --v1:#4C8DFF; --v2:#3FB971; --v3:#E3A008; --v4:#A882E8; --v5:#3CC7C9; --v6:#F0533F;
+    }
+  }
+  /* explicit toggle wins in both directions */
+  :root[data-theme="dark"] {
+    --bg:#0E1116; --surface:#161B22; --surface-2:#1E252E; --surface-3:#252E39;
+    --border:#2A323C; --border-strong:#3A444F;
+    --text:#E6EDF3; --text-muted:#93A1B0; --text-faint:#6C7A89;
+    --primary:#4C8DFF; --primary-weak:#12233F; --primary-ink:#9CC2FF;
+    --success:#3FB971; --success-weak:#122B1E;
+    --warning:#E3A008; --warning-weak:#33290A;
+    --danger:#F0533F;  --danger-weak:#341613;
+    --info:#5AA2FF;    --info-weak:#122238;
+    --purple:#A882E8;  --purple-weak:#241834;
+    --teal:#3CC7C9;    --teal-weak:#0C2B2C;
+    --gray:#8B96A4;    --gray-weak:#20272F;
+    --focus:#4C8DFF;
+    --shadow-raised:0 1px 2px rgba(0,0,0,.4);
+    --shadow-float:0 10px 30px rgba(0,0,0,.5);
+    --v1:#4C8DFF; --v2:#3FB971; --v3:#E3A008; --v4:#A882E8; --v5:#3CC7C9; --v6:#F0533F;
+  }
+  :root[data-theme="light"] {
+    --bg:#F4F6F8; --surface:#FFFFFF; --surface-2:#F0F2F5; --surface-3:#E9EDF2;
+    --border:#DCE1E7; --border-strong:#C6CDD6;
+    --text:#1B2733; --text-muted:#5C6B7A; --text-faint:#8996A4;
+    --primary:#1F6FEB; --primary-weak:#E7F0FF; --primary-ink:#0B48A8;
+    --success:#1F9254; --success-weak:#E4F4EB;
+    --warning:#B7791F; --warning-weak:#FBF0DC;
+    --danger:#C0392B;  --danger-weak:#FBE7E4;
+    --info:#2C7BE5;    --info-weak:#E6F0FC;
+    --purple:#7C4DC4;  --purple-weak:#F0E9FB;
+    --teal:#0F8B8D;    --teal-weak:#E0F3F3;
+    --gray:#6B7684;    --gray-weak:#EDEFF2;
+    --focus:#1F6FEB;
+    --shadow-raised:0 1px 2px rgba(16,24,40,.08), 0 1px 3px rgba(16,24,40,.06);
+    --shadow-float:0 8px 24px rgba(16,24,40,.16);
+    --v1:#1F6FEB; --v2:#1F9254; --v3:#B7791F; --v4:#7C4DC4; --v5:#0F8B8D; --v6:#C0392B;
+  }
+
+  body { margin:0; }
+  .umms {
+    font-family:var(--sans); font-size:14px; line-height:1.45;
+    color:var(--text); background:var(--bg);
+    -webkit-font-smoothing:antialiased; height:100vh; overflow:hidden;
+  }
+  .mono { font-family:var(--mono); font-variant-numeric:tabular-nums; }
+  .num { font-variant-numeric:tabular-nums; }
+  a { color:var(--primary); text-decoration:none; }
+  a:hover { text-decoration:underline; }
+  button { font-family:inherit; font-size:inherit; cursor:pointer; }
+  :focus-visible { outline:3px solid var(--focus); outline-offset:2px; border-radius:4px; }
+  svg { display:block; }
+
+  /* ---------- app shell ---------- */
+  .app {
+    display:grid; height:100vh;
+    grid-template-columns:248px 1fr; grid-template-rows:56px 1fr;
+    grid-template-areas:"top top" "side main";
+  }
+  .app.rail { grid-template-columns:64px 1fr; }
+
+  /* ---------- top bar ---------- */
+  .top {
+    grid-area:top; display:flex; align-items:center; gap:14px;
+    padding:0 16px; background:var(--surface); border-bottom:1px solid var(--border);
+    z-index:40;
+  }
+  .brand { display:flex; align-items:center; gap:10px; font-weight:700; letter-spacing:.02em; }
+  .brand .mark {
+    width:28px; height:28px; border-radius:7px; display:grid; place-items:center;
+    background:var(--primary); color:#fff; font-family:var(--mono); font-weight:700; font-size:15px;
+  }
+  .brand .wordmark { font-size:15px; }
+  .brand .sub { color:var(--text-faint); font-weight:500; font-size:11px; letter-spacing:.06em; text-transform:uppercase; }
+  .iconbtn {
+    display:grid; place-items:center; width:36px; height:36px; border-radius:8px;
+    background:transparent; border:1px solid transparent; color:var(--text-muted);
+  }
+  .iconbtn:hover { background:var(--surface-2); color:var(--text); }
+  .search {
+    flex:1; max-width:520px; display:flex; align-items:center; gap:8px;
+    background:var(--surface-2); border:1px solid var(--border); border-radius:9px;
+    padding:7px 11px; color:var(--text-faint);
+  }
+  .search input {
+    border:0; background:transparent; outline:none; color:var(--text);
+    font-family:inherit; font-size:13px; width:100%;
+  }
+  .search kbd {
+    font-family:var(--mono); font-size:11px; color:var(--text-faint);
+    border:1px solid var(--border); border-radius:4px; padding:1px 5px; background:var(--surface);
+  }
+  .top .spacer { flex:1; }
+  .sitepick, .period {
+    display:flex; align-items:center; gap:7px; background:var(--surface); color:var(--text);
+    border:1px solid var(--border); border-radius:8px; padding:6px 10px; font-size:13px; font-weight:500;
+  }
+  .sitepick .dot { width:7px; height:7px; border-radius:50%; background:var(--success); }
+  .bell { position:relative; }
+  .bell .badge {
+    position:absolute; top:2px; right:2px; min-width:16px; height:16px; padding:0 3px;
+    background:var(--danger); color:#fff; border-radius:9px; font-size:10px; font-weight:700;
+    display:grid; place-items:center; font-family:var(--mono);
+  }
+  .avatar {
+    width:32px; height:32px; border-radius:50%; display:grid; place-items:center;
+    background:var(--primary-weak); color:var(--primary-ink); font-weight:700; font-size:12px; font-family:var(--mono);
+    border:1px solid var(--border);
+  }
+
+  /* ---------- sidebar ---------- */
+  .side {
+    grid-area:side; background:var(--surface); border-right:1px solid var(--border);
+    overflow-y:auto; overflow-x:hidden; padding:8px 0 40px;
+  }
+  .side::-webkit-scrollbar { width:8px; } .side::-webkit-scrollbar-thumb { background:var(--border-strong); border-radius:4px; }
+  .navgroup { padding:2px 0; }
+  .navhead {
+    display:flex; align-items:center; gap:8px; width:100%; text-align:left;
+    padding:10px 16px 6px; color:var(--text-faint); font-size:10.5px; font-weight:700;
+    letter-spacing:.09em; text-transform:uppercase; background:transparent; border:0;
+  }
+  .navhead .chev { margin-left:auto; transition:transform .15s; }
+  .navgroup.closed .chev { transform:rotate(-90deg); }
+  .navgroup.closed .navlist { display:none; }
+  .navlist { display:flex; flex-direction:column; }
+  .navitem {
+    display:flex; align-items:center; gap:11px; padding:8px 16px 8px 18px;
+    color:var(--text-muted); background:transparent; border:0; border-left:3px solid transparent;
+    font-size:13px; text-align:left; width:100%; position:relative;
+  }
+  .navitem .ico { color:var(--text-faint); flex:none; }
+  .navitem:hover { background:var(--surface-2); color:var(--text); }
+  .navitem.active { color:var(--primary); background:var(--primary-weak); border-left-color:var(--primary); font-weight:600; }
+  .navitem.active .ico { color:var(--primary); }
+  .navitem .tag {
+    margin-left:auto; font-family:var(--mono); font-size:10px; font-weight:700;
+    background:var(--danger); color:#fff; border-radius:9px; padding:1px 6px;
+  }
+  .navitem .tag.muted { background:var(--surface-3); color:var(--text-muted); }
+  .app.rail .navhead span, .app.rail .navitem span:not(.tag), .app.rail .brand .wordmark, .app.rail .brand .sub { display:none; }
+  .app.rail .navhead { justify-content:center; padding:10px 0 4px; }
+  .app.rail .navitem { justify-content:center; padding:10px 0; border-left-width:0; }
+  .app.rail .navitem.active { border-left-width:3px; }
+  .app.rail .navitem .tag { display:none; }
+
+  /* ---------- main ---------- */
+  .main { grid-area:main; overflow-y:auto; padding:20px 24px 60px; }
+  .main::-webkit-scrollbar { width:10px; } .main::-webkit-scrollbar-thumb { background:var(--border-strong); border-radius:5px; }
+  .view[hidden] { display:none; }
+  .crumb { color:var(--text-faint); font-size:12px; display:flex; gap:7px; align-items:center; margin-bottom:6px; }
+  .crumb .sep { opacity:.5; }
+  .pagehead { display:flex; align-items:flex-end; gap:16px; flex-wrap:wrap; margin-bottom:16px; }
+  .pagehead h1 { font-size:21px; font-weight:700; margin:0; letter-spacing:-.01em; text-wrap:balance; }
+  .pagehead .controls { margin-left:auto; display:flex; gap:8px; flex-wrap:wrap; }
+
+  /* buttons */
+  .btn {
+    display:inline-flex; align-items:center; gap:7px; border-radius:8px; padding:7px 13px;
+    font-size:13px; font-weight:600; border:1px solid var(--border); background:var(--surface); color:var(--text);
+  }
+  .btn:hover { background:var(--surface-2); }
+  .btn.primary { background:var(--primary); border-color:var(--primary); color:#fff; }
+  .btn.primary:hover { filter:brightness(1.06); }
+  .btn.danger { color:var(--danger); border-color:var(--danger); background:transparent; }
+  .btn.ghost { background:transparent; border-color:var(--border); color:var(--text-muted); }
+  .btn.sm { padding:4px 9px; font-size:12px; }
+
+  /* alert banner */
+  .alert {
+    display:flex; align-items:center; gap:12px; padding:11px 14px; border-radius:10px;
+    background:var(--warning-weak); border:1px solid var(--warning); color:var(--text);
+    margin-bottom:16px; position:relative;
+  }
+  .alert::before { content:""; position:absolute; left:0; top:0; bottom:0; width:4px; background:var(--warning); border-radius:10px 0 0 10px; }
+  .alert .ico { color:var(--warning); flex:none; }
+  .alert .msg { flex:1; font-size:13px; }
+  .alert .msg strong { font-weight:700; }
+  .alert .acts { display:flex; gap:6px; }
+
+  /* cards + grid */
+  .grid { display:grid; gap:16px; }
+  .kpis { grid-template-columns:repeat(5,1fr); }
+  .card {
+    background:var(--surface); border:1px solid var(--border); border-radius:10px;
+    box-shadow:var(--shadow-raised);
+  }
+  .card.pad { padding:16px; }
+  .kpi { padding:14px 15px; display:flex; flex-direction:column; gap:6px; min-width:0; }
+  .kpi .label { font-size:10.5px; font-weight:700; letter-spacing:.08em; text-transform:uppercase; color:var(--text-muted); }
+  .kpi .valrow { display:flex; align-items:baseline; gap:8px; }
+  .kpi .value { font-family:var(--mono); font-size:24px; font-weight:700; letter-spacing:-.02em; line-height:1.05; }
+  .kpi .unit { font-size:12px; color:var(--text-faint); font-weight:600; }
+  .kpi .spark { margin-top:2px; height:30px; }
+  .kpi .foot { margin-top:auto; padding-top:6px; }
+  .kpi .foot a { font-size:12px; font-weight:600; display:inline-flex; align-items:center; gap:4px; }
+  .pill {
+    display:inline-flex; align-items:center; gap:3px; font-family:var(--mono); font-size:11px; font-weight:700;
+    padding:1px 7px; border-radius:20px;
+  }
+  .pill.up { color:var(--success); background:var(--success-weak); }
+  .pill.down { color:var(--danger); background:var(--danger-weak); }
+  .pill.flat { color:var(--text-muted); background:var(--surface-2); }
+
+  /* status chip */
+  .chip {
+    display:inline-flex; align-items:center; gap:6px; font-size:11.5px; font-weight:600;
+    padding:2px 9px 2px 7px; border-radius:20px; white-space:nowrap; line-height:1.5;
+  }
+  .chip .cdot { width:7px; height:7px; border-radius:50%; background:currentColor; flex:none; }
+  .chip.gray   { color:var(--gray);   background:var(--gray-weak); }
+  .chip.amber  { color:var(--warning);background:var(--warning-weak); }
+  .chip.blue   { color:var(--primary);background:var(--primary-weak); }
+  .chip.green  { color:var(--success);background:var(--success-weak); }
+  .chip.red    { color:var(--danger); background:var(--danger-weak); }
+  .chip.purple { color:var(--purple); background:var(--purple-weak); }
+  .chip.teal   { color:var(--teal);   background:var(--teal-weak); }
+
+  .sectitle { display:flex; align-items:center; gap:8px; font-size:13px; font-weight:700; margin:0 0 12px; }
+  .sectitle .hint { margin-left:auto; font-weight:500; font-size:11.5px; color:var(--text-faint); }
+
+  /* data table */
+  .tablewrap { overflow-x:auto; }
+  table.data { width:100%; border-collapse:collapse; font-size:13px; }
+  table.data th {
+    text-align:left; font-size:10.5px; font-weight:700; letter-spacing:.05em; text-transform:uppercase;
+    color:var(--text-muted); padding:9px 12px; border-bottom:1px solid var(--border); white-space:nowrap;
+    background:var(--surface-2); position:sticky; top:0;
+  }
+  table.data td { padding:9px 12px; border-bottom:1px solid var(--border); white-space:nowrap; }
+  table.data tr:hover td { background:var(--surface-2); }
+  table.data .r { text-align:right; }
+  table.data tr:last-child td { border-bottom:0; }
+  .ohtag { font-family:var(--mono); font-weight:700; }
+  .ohtag::before { content:"●"; margin-right:5px; font-size:10px; vertical-align:1px; }
+  .oh-red::before { color:var(--danger); } .oh-amber::before { color:var(--warning); } .oh-green::before { color:var(--success); }
+
+  .toolbar { display:flex; align-items:center; gap:8px; flex-wrap:wrap; margin-bottom:12px; }
+  .views { display:flex; gap:6px; }
+  .viewchip { font-size:12px; padding:4px 10px; border-radius:20px; border:1px solid var(--border); background:var(--surface); color:var(--text-muted); }
+  .viewchip.on { background:var(--primary-weak); color:var(--primary); border-color:var(--primary); font-weight:600; }
+  .filterchip { font-size:12px; padding:4px 10px; border-radius:7px; border:1px solid var(--border); background:var(--surface-2); color:var(--text-muted); display:inline-flex; gap:6px; align-items:center; }
+
+  /* direction tag */
+  .dir { font-family:var(--mono); font-size:11px; font-weight:700; padding:1px 6px; border-radius:5px; }
+  .dir.in { color:var(--success); background:var(--success-weak); }
+  .dir.out { color:var(--danger); background:var(--danger-weak); }
+
+  /* right rail queue */
+  .split { display:grid; grid-template-columns:1fr 372px; gap:16px; align-items:start; }
+  .queue { display:flex; flex-direction:column; }
+  .qitem { padding:11px 14px; border-bottom:1px solid var(--border); display:flex; flex-direction:column; gap:5px; }
+  .qitem:last-child { border-bottom:0; }
+  .qtop { display:flex; align-items:center; gap:8px; }
+  .qtop .qno { font-family:var(--mono); font-weight:700; font-size:12.5px; }
+  .qtop .qamt { margin-left:auto; font-family:var(--mono); font-weight:700; font-size:12.5px; }
+  .qmeta { color:var(--text-muted); font-size:12px; display:flex; align-items:center; gap:7px; flex-wrap:wrap; }
+  .qmeta .age { font-family:var(--mono); font-weight:700; }
+  .age.g { color:var(--success); } .age.a { color:var(--warning); } .age.r { color:var(--danger); }
+  .qacts { display:flex; gap:6px; margin-top:3px; }
+  .qacts .btn { padding:3px 10px; font-size:12px; }
+
+  /* legend */
+  .legend { display:flex; flex-wrap:wrap; gap:12px; margin-top:12px; font-size:12px; color:var(--text-muted); }
+  .legend span { display:inline-flex; align-items:center; gap:6px; }
+  .legend i { width:10px; height:10px; border-radius:3px; display:inline-block; }
+
+  /* timeline */
+  .timeline { position:relative; padding-left:22px; }
+  .timeline::before { content:""; position:absolute; left:6px; top:4px; bottom:4px; width:2px; background:var(--border); }
+  .tnode { position:relative; padding:0 0 16px 4px; }
+  .tnode::before { content:""; position:absolute; left:-19px; top:3px; width:12px; height:12px; border-radius:50%; background:var(--surface); border:2px solid var(--primary); }
+  .tnode.done::before { background:var(--success); border-color:var(--success); }
+  .tnode .twhen { font-family:var(--mono); font-size:11.5px; color:var(--text-faint); }
+  .tnode .twhat { font-size:13px; margin:2px 0; }
+  .tnode .twho { font-size:12px; color:var(--text-muted); }
+
+  /* tabs */
+  .tabs { display:flex; gap:4px; border-bottom:1px solid var(--border); margin-bottom:16px; flex-wrap:wrap; }
+  .tab { padding:9px 14px; font-size:13px; font-weight:600; color:var(--text-muted); background:transparent; border:0; border-bottom:2px solid transparent; margin-bottom:-1px; }
+  .tab:hover { color:var(--text); }
+  .tab.on { color:var(--primary); border-bottom-color:var(--primary); }
+  .tabpane[hidden] { display:none; }
+
+  /* header strip (job) */
+  .strip { display:flex; flex-wrap:wrap; gap:8px 22px; padding:14px 16px; }
+  .strip .f { display:flex; flex-direction:column; gap:2px; }
+  .strip .f .k { font-size:10.5px; font-weight:700; letter-spacing:.06em; text-transform:uppercase; color:var(--text-faint); }
+  .strip .f .v { font-family:var(--mono); font-weight:600; font-size:13.5px; }
+
+  .kv { display:grid; grid-template-columns:auto 1fr; gap:6px 14px; font-size:13px; }
+  .kv dt { color:var(--text-muted); }
+  .kv dd { margin:0; font-family:var(--mono); font-weight:600; text-align:right; }
+
+  .checklist { list-style:none; margin:10px 0 0; padding:0; display:flex; flex-direction:column; gap:7px; font-size:13px; }
+  .checklist li { display:flex; align-items:center; gap:9px; }
+  .checklist .mk { width:18px; height:18px; border-radius:50%; display:grid; place-items:center; flex:none; font-size:11px; font-weight:700; }
+  .checklist .ok .mk { background:var(--success-weak); color:var(--success); }
+  .checklist .no .mk { background:var(--danger-weak); color:var(--danger); }
+  .checklist .no { color:var(--text); } .checklist .ok { color:var(--text-muted); }
+
+  .cardhead { display:flex; align-items:center; gap:10px; padding:13px 16px; border-bottom:1px solid var(--border); }
+  .cardhead h3 { font-size:13px; font-weight:700; margin:0; }
+  .cardhead .r { margin-left:auto; }
+
+  .foota { margin-top:26px; padding-top:14px; border-top:1px solid var(--border); color:var(--text-faint); font-size:12px; display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
+  .foota .badge { font-family:var(--mono); background:var(--surface-2); border:1px solid var(--border); border-radius:6px; padding:1px 7px; }
+
+  .scrim { display:none; }
+
+  /* responsive */
+  @media (max-width:1180px){ .kpis{ grid-template-columns:repeat(3,1fr);} .split{ grid-template-columns:1fr; } }
+  @media (max-width:900px){
+    .app{ grid-template-columns:1fr; grid-template-areas:"top" "main"; }
+    .side{ position:fixed; top:56px; bottom:0; left:0; width:260px; z-index:50; transform:translateX(-100%); transition:transform .2s; box-shadow:var(--shadow-float); }
+    .app.navopen .side{ transform:translateX(0); }
+    .app.navopen .scrim{ display:block; position:fixed; inset:56px 0 0 0; background:rgba(0,0,0,.4); z-index:45; }
+    .search{ display:none; }
+    .kpis{ grid-template-columns:repeat(2,1fr); }
+    .chartrow{ grid-template-columns:1fr !important; }
+  }
+  @media (max-width:560px){ .kpis{ grid-template-columns:1fr 1fr; } .period{ display:none; } }
+  @media (prefers-reduced-motion:reduce){ *{ transition:none !important; } }
+</style>
+
+<div class="umms">
+<div class="app" id="app">
+
+  <!-- ================= TOP BAR ================= -->
+  <header class="top">
+    <button class="iconbtn" id="navToggle" aria-label="Toggle navigation" data-ic="menu"></button>
+    <div class="brand">
+      <span class="mark">U</span>
+      <span class="wordmark">UMMS</span>
+      <span class="sub">Command Center</span>
+    </div>
+    <label class="search" aria-label="Global search">
+      <span data-ic="search" class="ico"></span>
+      <input placeholder="Search doc no, item, asset, battery serial, job…" />
+      <kbd>/</kbd>
+    </label>
+    <span class="spacer"></span>
+    <button class="sitepick" title="Site scope (sec_user_site)"><span class="dot"></span>Site: CMB <span data-ic="chev"></span></button>
+    <button class="iconbtn bell" aria-label="Notifications" data-ic="bell"><span class="badge">12</span></button>
+    <button class="iconbtn" id="themeBtn" aria-label="Toggle light or dark theme" data-ic="moon"></button>
+    <div class="avatar" title="Jane Devanampiya · Operational Manager">JD</div>
+  </header>
+
+  <!-- ================= SIDEBAR ================= -->
+  <aside class="side" id="side"></aside>
+  <div class="scrim" id="scrim"></div>
+
+  <!-- ================= MAIN ================= -->
+  <main class="main" id="main">
+
+    <!-- ====== EXECUTIVE ====== -->
+    <section class="view" id="view-exec">
+      <div class="crumb"><span>Dashboards</span><span class="sep">›</span><span>Executive Command Center</span></div>
+      <div class="pagehead">
+        <h1>Executive Command Center</h1>
+        <div class="controls">
+          <button class="btn ghost">Site: All my sites <span data-ic="chev"></span></button>
+          <button class="period btn ghost">Period: Jul-26 <span data-ic="chev"></span></button>
+          <button class="btn ghost" data-ic="refresh" aria-label="Refresh"></button>
+        </div>
+      </div>
+
+      <div class="alert">
+        <span class="ico" data-ic="warn"></span>
+        <span class="msg"><strong>14 items</strong> below reorder · <strong>6 GRN lines</strong> awaiting price (LKR&nbsp;1.2M unvalued) · <strong>3 jobs</strong> overdue · <strong>2 batteries</strong> warranty-expiring in 30d</span>
+        <span class="acts"><button class="btn sm" data-go="view-stores">Price queue</button><button class="btn sm" data-go="view-workshop">View jobs</button></span>
+      </div>
+
+      <div class="grid kpis" id="execKpis"></div>
+
+      <div class="split" style="margin-top:16px">
+        <div class="grid chartrow" style="grid-template-columns:1fr 1fr">
+          <div class="card pad">
+            <div class="sectitle">Stock Value Trend <span class="hint">6 months · inv_stock_balance</span></div>
+            <div id="chartStockVal"></div>
+          </div>
+          <div class="card pad">
+            <div class="sectitle">Job Throughput <span class="hint">created vs closed · tx_jobcard</span></div>
+            <div id="chartJobs"></div>
+          </div>
+          <div class="card pad">
+            <div class="sectitle">Stock Mix by Category <span class="hint">by value</span></div>
+            <div id="chartMix"></div>
+          </div>
+          <div class="card pad">
+            <div class="sectitle">Jobs by Status <span class="hint">workshop WIP</span></div>
+            <div id="chartStatus"></div>
+          </div>
+        </div>
+
+        <div style="display:flex; flex-direction:column; gap:16px">
+          <div class="card">
+            <div class="cardhead"><h3>My Approval Queue</h3><span class="chip amber r"><span class="cdot"></span>12 pending</span></div>
+            <div class="queue" id="execQueue"></div>
+          </div>
+          <div class="card">
+            <div class="cardhead"><h3>Overdue Jobs</h3><span class="chip red r"><span class="cdot"></span>3</span></div>
+            <div class="queue" id="execOverdue"></div>
+          </div>
+        </div>
+      </div>
+      <div class="foota">
+        <span class="badge">PROTOTYPE</span>
+        <span>Static design prototype · sample data · realizes <span class="mono">docs/09-uiux-design.md</span>. Every figure traces to a table in the UMMS data model.</span>
+      </div>
+    </section>
+
+    <!-- ====== STORES ====== -->
+    <section class="view" id="view-stores" hidden>
+      <div class="crumb"><span>Stores</span><span class="sep">›</span><span>Stock Balances</span></div>
+      <div class="pagehead">
+        <h1>Stock Balances</h1>
+        <div class="controls">
+          <button class="btn ghost">+ New Issue</button>
+          <button class="btn primary">+ New GRN <span data-ic="chev"></span></button>
+        </div>
+      </div>
+      <div class="alert" style="background:var(--danger-weak); border-color:var(--danger)">
+        <span class="ico" data-ic="warn" style="color:var(--danger)"></span>
+        <span class="msg"><strong>14 items</strong> at/below reorder level · <strong>3 negative on-hand</strong> (investigate)</span>
+        <span class="acts"><button class="btn sm">Create MRN</button></span>
+      </div>
+      <div class="toolbar">
+        <div class="views">
+          <button class="viewchip on">All</button>
+          <button class="viewchip">★ Low stock</button>
+          <button class="viewchip">★ My fast-movers</button>
+          <button class="viewchip">Pending price</button>
+        </div>
+        <span class="spacer" style="flex:1"></span>
+        <span class="filterchip">Category <span data-ic="chev"></span></span>
+        <span class="filterchip">Below ROL ✓</span>
+        <button class="iconbtn" data-ic="download" aria-label="Export"></button>
+      </div>
+      <div class="card">
+        <div class="tablewrap">
+          <table class="data" id="storesTable"></table>
+        </div>
+      </div>
+      <div class="legend">
+        <span><span class="ohtag oh-red"></span> ≤ reorder / negative</span>
+        <span><span class="ohtag oh-amber"></span> at reorder</span>
+        <span><span class="ohtag oh-green"></span> healthy</span>
+        <span style="margin-left:auto">Showing 1–6 of 842 · MWAC = moving weighted-average cost</span>
+      </div>
+    </section>
+
+    <!-- ====== LUBRICANT ====== -->
+    <section class="view" id="view-lube" hidden>
+      <div class="crumb"><span>Lubricant</span><span class="sep">›</span><span>Lubricant Dashboard</span></div>
+      <div class="pagehead">
+        <h1>Lubricant Dashboard</h1>
+        <div class="controls"><button class="btn primary">+ Lube Issue</button></div>
+      </div>
+      <div class="grid kpis" id="lubeKpis" style="grid-template-columns:repeat(4,1fr)"></div>
+      <div class="split" style="margin-top:16px">
+        <div class="card">
+          <div class="cardhead"><h3>Critical Stock · Days-of-Cover</h3><span class="hint r" style="color:var(--text-faint);font-size:11.5px">days-left = on-hand ÷ 30d avg daily OUT</span></div>
+          <div class="tablewrap"><table class="data" id="lubeTable"></table></div>
+        </div>
+        <div style="display:flex; flex-direction:column; gap:16px">
+          <div class="card pad">
+            <div class="sectitle">Consumption Trend <span class="hint">litres/day · 30d</span></div>
+            <div id="chartLube"></div>
+          </div>
+          <div class="card pad">
+            <div class="sectitle">Consumption by Asset <span class="hint">top 6 · MTD</span></div>
+            <div id="chartLubeAsset"></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== BATTERY ====== -->
+    <section class="view" id="view-battery" hidden>
+      <div class="crumb"><span>Battery</span><span class="sep">›</span><span>Register</span><span class="sep">›</span><span class="mono">SN-4471190</span></div>
+      <div class="pagehead">
+        <h1 class="mono" style="font-size:19px">BAT-SN-4471190</h1>
+        <span class="chip blue" style="align-self:center"><span class="cdot"></span>IN_SERVICE</span>
+        <div class="controls">
+          <button class="btn ghost">Transfer</button>
+          <button class="btn ghost">Return <span data-ic="chev"></span></button>
+        </div>
+      </div>
+      <div class="grid" style="grid-template-columns:1fr 1fr; margin-bottom:16px">
+        <div class="card pad">
+          <div class="sectitle">Identity <span class="hint">md_battery</span></div>
+          <dl class="kv">
+            <dt>Serial</dt><dd>SN-4471190</dd>
+            <dt>Model (item)</dt><dd>BAT-N200</dd>
+            <dt>Brand / Type</dt><dd>Exide · N200 MF</dd>
+            <dt>Acquisition cost</dt><dd>LKR 22,500.00</dd>
+            <dt>Current asset</dt><dd>WP-1123</dd>
+            <dt>In service since</dt><dd>12-Jan-2025</dd>
+          </dl>
+        </div>
+        <div class="card pad">
+          <div class="sectitle">Warranty <span class="hint">md_warranty_term</span></div>
+          <dl class="kv">
+            <dt>Term</dt><dd>24 months</dd>
+            <dt>Start</dt><dd>12-Jan-2025</dd>
+            <dt>Ends</dt><dd>12-Jan-2027</dd>
+            <dt>Days left</dt><dd style="color:var(--warning)">187 d</dd>
+            <dt>Claimable</dt><dd style="color:var(--success)">Yes</dd>
+          </dl>
+          <div style="margin-top:12px"><button class="btn ghost sm">Raise warranty claim</button></div>
+        </div>
+      </div>
+      <div class="card">
+        <div class="cardhead"><h3>Lifecycle Log</h3><span class="hint r" style="color:var(--text-faint);font-size:11.5px">hist_battery_event · append-only · newest first</span></div>
+        <div class="tablewrap"><table class="data" id="batteryTable"></table></div>
+      </div>
+      <p style="color:var(--text-muted); font-size:12.5px; margin-top:12px">Every row links to its source document. <span class="mono">md_battery.current_asset_id</span> &amp; <span class="mono">battery_status</span> update in the same transaction as each event — the full serial history is preserved permanently.</p>
+    </section>
+
+    <!-- ====== WORKSHOP / JOB CARD COCKPIT ====== -->
+    <section class="view" id="view-workshop" hidden>
+      <div class="crumb"><span>Workshop</span><span class="sep">›</span><span>Job Cards</span><span class="sep">›</span><span class="mono">JC-CMB-26-000502</span></div>
+      <div class="pagehead">
+        <h1 class="mono" style="font-size:19px">JC-CMB-26-000502</h1>
+        <span class="chip blue" style="align-self:center"><span class="cdot"></span>IN_PROGRESS</span>
+        <div class="controls"><button class="btn primary">Add Progress</button><button class="btn ghost" data-ic="dots" aria-label="More"></button></div>
+      </div>
+      <div class="card strip" style="margin-bottom:16px">
+        <div class="f"><span class="k">Asset</span><span class="v">WP-1123 · Lorry LP-4471</span></div>
+        <div class="f"><span class="k">Fault</span><span class="v">Engine overhaul</span></div>
+        <div class="f"><span class="k">Opened</span><span class="v">02-Jul-26</span></div>
+        <div class="f"><span class="k">Approvals</span><span class="v">TM&nbsp;✓ · OM&nbsp;⏳</span></div>
+        <div class="f"><span class="k">Est. cost</span><span class="v">LKR 2.10M</span></div>
+        <div class="f"><span class="k">Actual (live)</span><span class="v">LKR 1.86M</span></div>
+        <div class="f"><span class="k">Variance</span><span class="v" style="color:var(--success)">−11%</span></div>
+        <div class="f"><span class="k">Days open</span><span class="v">7</span></div>
+        <div class="f"><span class="k">Bay</span><span class="v">B-2</span></div>
+      </div>
+      <div class="tabs" id="jobTabs">
+        <button class="tab on" data-pane="p-tasks">Tasks</button>
+        <button class="tab" data-pane="p-prog">Progress</button>
+        <button class="tab" data-pane="p-parts">Parts</button>
+        <button class="tab" data-pane="p-labour">Labour</button>
+        <button class="tab" data-pane="p-out">Outside</button>
+        <button class="tab" data-pane="p-cost">Cost Summary</button>
+      </div>
+
+      <div class="tabpane" id="p-tasks">
+        <div class="card"><div class="tablewrap"><table class="data" id="taskTable"></table></div></div>
+      </div>
+
+      <div class="tabpane" id="p-prog" hidden>
+        <div class="card pad">
+          <div class="timeline" id="progTimeline"></div>
+        </div>
+      </div>
+
+      <div class="tabpane" id="p-parts" hidden>
+        <div class="card"><div class="tablewrap"><table class="data" id="partsTable"></table></div></div>
+        <p style="color:var(--text-muted); font-size:12.5px; margin-top:10px">Material cost rolls to <span class="mono">cost_job_summary.material_cost</span>; an un-priced part flags the job (<span class="mono">tx_job_parts.is_provisional</span>) and blocks closure until priced.</p>
+      </div>
+
+      <div class="tabpane" id="p-labour" hidden>
+        <div class="card"><div class="tablewrap"><table class="data" id="labourTable"></table></div></div>
+      </div>
+
+      <div class="tabpane" id="p-out" hidden>
+        <div class="card"><div class="tablewrap"><table class="data" id="outTable"></table></div></div>
+      </div>
+
+      <div class="tabpane" id="p-cost" hidden>
+        <div class="split">
+          <div class="card"><div class="tablewrap"><table class="data" id="costTable"></table></div></div>
+          <div class="card pad">
+            <div class="sectitle">Close Readiness <span class="hint">contract §7.7</span></div>
+            <ul class="checklist" id="closeList"></ul>
+            <div style="margin-top:14px"><button class="btn ghost" disabled style="opacity:.55; cursor:not-allowed; width:100%">Close job — blocked</button></div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ====== APPROVALS ====== -->
+    <section class="view" id="view-approvals" hidden>
+      <div class="crumb"><span>Approvals</span><span class="sep">›</span><span>My Approval Queue</span></div>
+      <div class="pagehead">
+        <h1>My Approval Queue</h1>
+        <div class="controls">
+          <button class="btn ghost">Bulk approve <span data-ic="chev"></span></button>
+          <button class="btn ghost">Sort: Ageing <span data-ic="chev"></span></button>
+        </div>
+      </div>
+      <div class="tabs">
+        <button class="tab on">Pending (12)</button>
+        <button class="tab">Returned to me (2)</button>
+        <button class="tab">Delegated (1)</button>
+        <button class="tab">History</button>
+      </div>
+      <div class="card"><div class="queue" id="apprQueue"></div></div>
+      <div class="legend"><span><span class="age g">●</span> &lt;4h</span><span><span class="age a">●</span> &lt;SLA</span><span><span class="age r">●</span> ≥SLA breach</span><span style="margin-left:auto">Approve is optimistic (row greys, 5s undo). Return &amp; Reject require a reason and are logged to <span class="mono">apr_action</span>.</span></div>
+    </section>
+
+  </main>
+</div>
+</div>
+
+<script>
+(function(){
+  "use strict";
+  var $ = function(s,r){ return (r||document).querySelector(s); };
+  var $$ = function(s,r){ return Array.prototype.slice.call((r||document).querySelectorAll(s)); };
+
+  /* ---------- icons (inline SVG, stroke=currentColor) ---------- */
+  var ICON = {
+    menu:'<path d="M3 6h18M3 12h18M3 18h18"/>',
+    search:'<circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/>',
+    chev:'<path d="M6 9l6 6 6-6"/>',
+    bell:'<path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
+    moon:'<path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/>',
+    sun:'<circle cx="12" cy="12" r="4.2"/><path d="M12 2v2.5M12 19.5V22M2 12h2.5M19.5 12H22M4.9 4.9l1.8 1.8M17.3 17.3l1.8 1.8M19.1 4.9l-1.8 1.8M6.7 17.3l-1.8 1.8"/>',
+    warn:'<path d="M12 3l9.5 16.5H2.5L12 3z"/><path d="M12 9v5M12 17.5v.5"/>',
+    refresh:'<path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v4h-4"/>',
+    download:'<path d="M12 3v12M7 11l5 5 5-5M4 21h16"/>',
+    dots:'<circle cx="5" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="19" cy="12" r="1.4"/>',
+    grid:'<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
+    box:'<path d="M21 8l-9-5-9 5 9 5 9-5zM3 8v8l9 5 9-5V8M12 13v8"/>',
+    drop:'<path d="M12 3s6 6.5 6 11a6 6 0 0 1-12 0c0-4.5 6-11 6-11z"/>',
+    battery:'<rect x="2" y="7" width="18" height="10" rx="2"/><path d="M22 10v4M6 10v4M10 10v4"/>',
+    wrench:'<path d="M14.7 6.3a4 4 0 0 0-5.4 5.2L3 17.8 6.2 21l6.3-6.3a4 4 0 0 0 5.2-5.4l-2.6 2.6-2.2-.4-.4-2.2 2.6-2.6z"/>',
+    check2:'<path d="M20 6L9 17l-5-5"/>',
+    inbox:'<path d="M3 12h5l2 3h4l2-3h5M4 4h16v16H4z"/>',
+    layers:'<path d="M12 3l9 5-9 5-9-5 9-5zM3 13l9 5 9-5"/>',
+    doc:'<path d="M6 2h8l4 4v16H6z"/><path d="M14 2v4h4"/>'
+  };
+  function svg(name, size){ size=size||18; return '<svg viewBox="0 0 24 24" width="'+size+'" height="'+size+'" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'+(ICON[name]||'')+'</svg>'; }
+  $$('[data-ic]').forEach(function(e){ e.innerHTML = svg(e.getAttribute('data-ic'), e.classList.contains('ico')?16:18); });
+
+  /* ---------- sidebar nav ---------- */
+  var NAV = [
+    { h:'Dashboards', ic:'grid', items:[
+      ['Executive Command Center','view-exec',null,'grid'],
+      ['Stores Overview','view-stores',null,'box'],
+      ['Lubricant Overview','view-lube',null,'drop'],
+      ['Battery Overview','view-battery',null,'battery'],
+      ['Workshop Overview','view-workshop',null,'wrench']]},
+    { h:'Stores', ic:'box', items:[
+      ['Goods Receipts (GRN)','view-stores',null,'doc'],
+      ['Issues','view-stores',null,'doc'],
+      ['Transfers','view-stores',null,'doc'],
+      ['Stock Balances','view-stores',null,'box'],
+      ['Pending Price Queue','view-stores','6','doc'],
+      ['Stock Ledger','view-stores',null,'layers']]},
+    { h:'Lubricant', ic:'drop', items:[
+      ['Lubricant Dashboard','view-lube',null,'drop'],
+      ['Lubricant Issues','view-lube',null,'doc'],
+      ['Monthly Balance','view-lube',null,'layers'],
+      ['Days-of-Cover Watch','view-lube','2','warn']]},
+    { h:'Battery', ic:'battery', items:[
+      ['Battery Register','view-battery',null,'battery'],
+      ['Issue to Asset','view-battery',null,'doc'],
+      ['Return / Warranty / Scrap','view-battery',null,'doc'],
+      ['Lifecycle Log','view-battery',null,'layers'],
+      ['Warranty Watch','view-battery','2','warn']]},
+    { h:'Workshop', ic:'wrench', items:[
+      ['Job Card Board','view-workshop',null,'wrench'],
+      ['Job Costing','view-workshop',null,'doc'],
+      ['Cost Variance','view-workshop',null,'layers'],
+      ['Outside Repairs','view-workshop',null,'doc']]},
+    { h:'Approvals', ic:'inbox', items:[
+      ['My Approval Queue','view-approvals','12','inbox'],
+      ['Approval History','view-approvals',null,'layers']]},
+    { h:'Masters', ic:'layers', items:[
+      ['Items','view-stores',null,'box'],
+      ['Assets (Fleet & Plant)','view-battery',null,'wrench'],
+      ['Suppliers','view-stores',null,'doc'],
+      ['Prices & History','view-stores',null,'layers']]}
+  ];
+  (function buildNav(){
+    var host = $('#side'); var html='';
+    NAV.forEach(function(g,gi){
+      html += '<div class="navgroup" data-g="'+gi+'">';
+      html += '<button class="navhead"><span>'+g.h+'</span><span class="chev" data-ic-inline>'+svg('chev',14)+'</span></button>';
+      html += '<div class="navlist">';
+      g.items.forEach(function(it){
+        var tag = it[2] ? '<span class="tag'+(it[0].indexOf('Approval')>=0||it[2]==='6'?'':'')+'">'+it[2]+'</span>' : '';
+        html += '<button class="navitem" data-go="'+it[1]+'"><span class="ico">'+svg(it[3],17)+'</span><span>'+it[0]+'</span>'+tag+'</button>';
+      });
+      html += '</div></div>';
+    });
+    host.innerHTML = html;
+    $$('.navhead', host).forEach(function(b){ b.addEventListener('click', function(){ b.parentNode.classList.toggle('closed'); }); });
+  })();
+
+  /* ---------- view routing ---------- */
+  function go(id, el){
+    $$('.view').forEach(function(v){ v.hidden = (v.id !== id); });
+    $$('.navitem').forEach(function(n){ n.classList.toggle('active', n.getAttribute('data-go')===id && (!el || n===el)); });
+    if(!$('.navitem.active')){ var f=$('.navitem[data-go="'+id+'"]'); if(f) f.classList.add('active'); }
+    $('#main').scrollTop = 0;
+    document.getElementById('app').classList.remove('navopen');
+  }
+  document.addEventListener('click', function(e){
+    var t = e.target.closest('[data-go]'); if(!t) return;
+    go(t.getAttribute('data-go'), t.classList.contains('navitem')?t:null);
+  });
+
+  /* ---------- theme ---------- */
+  var root = document.documentElement;
+  function applyThemeIcon(){
+    var isDark = root.getAttribute('data-theme')==='dark' ||
+      (!root.getAttribute('data-theme') && window.matchMedia('(prefers-color-scheme: dark)').matches);
+    $('#themeBtn').innerHTML = svg(isDark?'sun':'moon',18);
+  }
+  try { var saved=localStorage.getItem('umms-theme'); if(saved) root.setAttribute('data-theme',saved); } catch(e){}
+  applyThemeIcon();
+  $('#themeBtn').addEventListener('click', function(){
+    var cur = root.getAttribute('data-theme');
+    var next = cur==='dark' ? 'light' : (cur==='light' ? 'dark' : (window.matchMedia('(prefers-color-scheme: dark)').matches?'light':'dark'));
+    root.setAttribute('data-theme', next);
+    try{ localStorage.setItem('umms-theme', next); }catch(e){}
+    applyThemeIcon(); redrawCharts();
+  });
+
+  /* ---------- sidebar toggle ---------- */
+  $('#navToggle').addEventListener('click', function(){
+    var app = $('#app');
+    if(window.innerWidth <= 900){ app.classList.toggle('navopen'); }
+    else { app.classList.toggle('rail'); }
+  });
+  $('#scrim').addEventListener('click', function(){ $('#app').classList.remove('navopen'); });
+
+  /* ---------- job tabs ---------- */
+  $$('#jobTabs .tab').forEach(function(tb){
+    tb.addEventListener('click', function(){
+      $$('#jobTabs .tab').forEach(function(x){ x.classList.remove('on'); });
+      tb.classList.add('on');
+      $$('.tabpane', $('#view-workshop')).forEach(function(p){ p.hidden = (p.id !== tb.getAttribute('data-pane')); });
+      redrawCharts();
+    });
+  });
+
+  /* ================= CHART HELPERS (SVG) ================= */
+  function cvar(n){ return getComputedStyle(document.documentElement).getPropertyValue(n).trim(); }
+  function areaChart(values, opts){
+    opts=opts||{}; var w=opts.w||560, h=opts.h||150, pad=opts.pad||{t:12,r:8,b:22,l:8};
+    var color=opts.color||cvar('--v1'); var labels=opts.labels||[];
+    var iw=w-pad.l-pad.r, ih=h-pad.t-pad.b;
+    var mn=Math.min.apply(null,values), mx=Math.max.apply(null,values); if(mn===mx){mn-=1;mx+=1;}
+    var xs=function(i){ return pad.l + (values.length<2?0:i/(values.length-1)*iw); };
+    var ys=function(v){ return pad.t + ih - (v-mn)/(mx-mn)*ih; };
+    var pts=values.map(function(v,i){ return xs(i)+','+ys(v); });
+    var line='M'+pts.join(' L');
+    var area='M'+xs(0)+','+(pad.t+ih)+' L'+pts.join(' L')+' L'+xs(values.length-1)+','+(pad.t+ih)+' Z';
+    var grid=''; for(var g=0; g<=3; g++){ var gy=pad.t+ih*g/3; grid+='<line x1="'+pad.l+'" y1="'+gy+'" x2="'+(w-pad.r)+'" y2="'+gy+'" stroke="'+cvar('--border')+'" stroke-width="1" stroke-dasharray="2 4"/>'; }
+    var lab=''; if(labels.length){ labels.forEach(function(t,i){ lab+='<text x="'+xs(i)+'" y="'+(h-6)+'" fill="'+cvar('--text-faint')+'" font-size="10" font-family="var(--mono)" text-anchor="middle">'+t+'</text>'; }); }
+    var lastx=xs(values.length-1), lasty=ys(values[values.length-1]);
+    return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'" preserveAspectRatio="none" style="overflow:visible">'
+      +'<defs><linearGradient id="ag" x1="0" x2="0" y1="0" y2="1"><stop offset="0" stop-color="'+color+'" stop-opacity="0.28"/><stop offset="1" stop-color="'+color+'" stop-opacity="0"/></linearGradient></defs>'
+      +grid+'<path d="'+area+'" fill="url(#ag)"/><path d="'+line+'" fill="none" stroke="'+color+'" stroke-width="2" stroke-linejoin="round"/>'
+      +'<circle cx="'+lastx+'" cy="'+lasty+'" r="3.5" fill="'+color+'"/><circle cx="'+lastx+'" cy="'+lasty+'" r="7" fill="'+color+'" fill-opacity="0.18"/>'
+      +lab+'</svg>';
+  }
+  function groupBars(series, labels, opts){
+    opts=opts||{}; var w=opts.w||560,h=opts.h||150,pad={t:12,r:8,b:22,l:8};
+    var iw=w-pad.l-pad.r, ih=h-pad.t-pad.b; var n=labels.length; var groupW=iw/n;
+    var all=[]; series.forEach(function(s){ all=all.concat(s.values); }); var mx=Math.max.apply(null,all)||1;
+    var barW=groupW/(series.length+1); var svgs='';
+    for(var g=0; g<=3; g++){ var gy=pad.t+ih*g/3; svgs+='<line x1="'+pad.l+'" y1="'+gy+'" x2="'+(w-pad.r)+'" y2="'+gy+'" stroke="'+cvar('--border')+'" stroke-width="1" stroke-dasharray="2 4"/>'; }
+    labels.forEach(function(lb,i){
+      series.forEach(function(s,si){
+        var v=s.values[i]; var bh=v/mx*ih; var x=pad.l+i*groupW+barW*(si+0.5); var y=pad.t+ih-bh;
+        svgs+='<rect x="'+x+'" y="'+y+'" width="'+barW*0.86+'" height="'+Math.max(bh,1)+'" rx="2" fill="'+s.color+'"/>';
+      });
+      svgs+='<text x="'+(pad.l+i*groupW+groupW/2)+'" y="'+(h-6)+'" fill="'+cvar('--text-faint')+'" font-size="10" font-family="var(--mono)" text-anchor="middle">'+lb+'</text>';
+    });
+    return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'">'+svgs+'</svg>';
+  }
+  function hbars(rows, opts){
+    opts=opts||{}; var mx=Math.max.apply(null,rows.map(function(r){return r.value;}))||1; var out='';
+    rows.forEach(function(r){
+      out+='<div style="display:flex;align-items:center;gap:10px;margin:7px 0">'
+        +'<span class="mono" style="width:74px;font-size:12px;color:var(--text-muted)">'+r.label+'</span>'
+        +'<span style="flex:1;height:12px;background:var(--surface-2);border-radius:6px;overflow:hidden"><span style="display:block;height:100%;width:'+(r.value/mx*100)+'%;background:'+(r.color||cvar('--v1'))+';border-radius:6px"></span></span>'
+        +'<span class="mono" style="width:56px;text-align:right;font-size:12px">'+r.disp+'</span></div>';
+    });
+    return out;
+  }
+  function donut(segs, opts){
+    opts=opts||{}; var r=52,cx=64,cy=64,C=2*Math.PI*r,off=0;
+    var total=segs.reduce(function(a,s){return a+s.value;},0); var arcs='';
+    segs.forEach(function(s){ var frac=s.value/total; var dash=frac*C;
+      arcs+='<circle cx="'+cx+'" cy="'+cy+'" r="'+r+'" fill="none" stroke="'+s.color+'" stroke-width="20" stroke-dasharray="'+dash+' '+(C-dash)+'" stroke-dashoffset="'+(-off)+'" transform="rotate(-90 '+cx+' '+cy+')"/>'; off+=dash; });
+    var leg=segs.map(function(s){ return '<span style="display:flex;align-items:center;gap:7px;font-size:12px"><i style="width:10px;height:10px;border-radius:3px;background:'+s.color+';display:inline-block"></i><span style="color:var(--text-muted)">'+s.label+'</span><span class="mono" style="margin-left:auto;font-weight:700">'+Math.round(s.value/total*100)+'%</span></span>'; }).join('');
+    return '<div style="display:flex;align-items:center;gap:18px;flex-wrap:wrap"><svg viewBox="0 0 128 128" width="128" height="128">'+arcs
+      +'<text x="64" y="60" text-anchor="middle" font-size="15" font-weight="700" font-family="var(--mono)" fill="'+cvar('--text')+'">'+opts.center+'</text>'
+      +'<text x="64" y="76" text-anchor="middle" font-size="9" font-family="var(--mono)" fill="'+cvar('--text-faint')+'">'+opts.sub+'</text></svg>'
+      +'<div style="flex:1;min-width:130px;display:flex;flex-direction:column;gap:7px">'+leg+'</div></div>';
+  }
+  function stacked(segs){
+    var total=segs.reduce(function(a,s){return a+s.value;},0); var bar=''; segs.forEach(function(s){ bar+='<span style="width:'+(s.value/total*100)+'%;background:'+s.color+'" title="'+s.label+'"></span>'; });
+    var leg=segs.map(function(s){ return '<span style="display:inline-flex;align-items:center;gap:6px"><i style="width:10px;height:10px;border-radius:3px;background:'+s.color+'"></i>'+s.label+' <span class="mono" style="font-weight:700">'+s.value+'</span></span>'; }).join('');
+    return '<div style="display:flex;height:26px;border-radius:7px;overflow:hidden;margin:6px 0 4px">'+bar.replace(/<span /g,'<span style="display:block;height:100%" ').replace(/style="display:block;height:100%" style="/g,'style="display:block;height:100%;')+'</div><div class="legend" style="margin-top:10px">'+leg+'</div>';
+  }
+  function spark(values,color){
+    var w=118,h=30,mn=Math.min.apply(null,values),mx=Math.max.apply(null,values); if(mn===mx){mn-=1;mx+=1;}
+    var pts=values.map(function(v,i){ return (i/(values.length-1)*w)+','+(h-2-(v-mn)/(mx-mn)*(h-4)); });
+    var last=pts[pts.length-1].split(',');
+    return '<svg viewBox="0 0 '+w+' '+h+'" width="100%" height="'+h+'" preserveAspectRatio="none"><polyline points="'+pts.join(' ')+'" fill="none" stroke="'+color+'" stroke-width="2" stroke-linejoin="round" stroke-linecap="round"/><circle cx="'+last[0]+'" cy="'+last[1]+'" r="2.6" fill="'+color+'"/></svg>';
+  }
+
+  /* ================= DATA ================= */
+  var EXEC_KPI = [
+    { label:'Stock Value', value:'48.6M', unit:'LKR', pill:['up','2.1%'], spark:[41,42,43,45,44,46,47,48.6], color:'--v1', foot:'View ledger', go:'view-stores' },
+    { label:'Open Jobs', value:'37', unit:'', pill:['down','4'], spark:[44,43,45,42,40,39,38,37], color:'--v2', foot:'Job board', go:'view-workshop' },
+    { label:'Pending Approvals', value:'12', unit:'3 SLA!', pill:['flat','—'], spark:[8,10,9,11,13,12,14,12], color:'--v3', foot:'My queue', go:'view-approvals' },
+    { label:'Lube Days-Cover', value:'9', unit:'days', pill:['down','2d'], spark:[14,13,12,12,11,10,9,9], color:'--v4', foot:'Watchlist', go:'view-lube' },
+    { label:'Batteries In Service', value:'128', unit:'', pill:['up','3'], spark:[120,121,123,124,125,126,127,128], color:'--v5', foot:'Register', go:'view-battery' }
+  ];
+  var APPR = [
+    { icon:'wrench', no:'JC-CMB-26-000502', ttl:'Engine overhaul · WP-1123', amt:'2.10M', by:'R.Silva', site:'CMB', step:'PENDING_OM_APPROVAL', age:'5h', ageC:'r', sla:true },
+    { icon:'box', no:'GRN-CMB-26-000210', ttl:'Filters receipt · Lanka Filters', amt:'0.40M', by:'Store', site:'CMB', step:'PENDING_TM_APPROVAL', age:'1h', ageC:'a' },
+    { icon:'wrench', no:'MRQ-KND-26-000488', ttl:'Brake parts · JC-KND-26-000455', amt:'0.09M', by:'A.Perera', site:'KND', step:'PENDING_TM_APPROVAL', age:'20m', ageC:'g' },
+    { icon:'doc', no:'OSR-CMB-26-000031', ttl:'Crank grinding · Precision Mach.', amt:'0.045M', by:'K.Fernando', site:'CMB', step:'PENDING_OM_APPROVAL', age:'3h', ageC:'g' }
+  ];
+  var OVERDUE = [
+    { no:'JC-CMB-26-000471', txt:'9d in AWAITING_PARTS', chip:['purple','AWAITING_PARTS'] },
+    { no:'JC-KND-26-000455', txt:'Overdue 2 days', chip:['red','OVERDUE'] },
+    { no:'JC-CMB-26-000468', txt:'Overdue 1 day · OSR delay', chip:['red','OVERDUE'] }
+  ];
+  var STORES = [
+    ['SPR-00231','Oil Filter DENSO 15208','EA','4','red','10','1,250.00','5,000.00'],
+    ['SPR-00988','Brake Pad Set — Front','SET','12','amber','12','8,400.00','100,800.00'],
+    ['LUB-15W40','Engine Oil 15W-40 (bulk)','L','210','green','80','920.00','193,200.00'],
+    ['BAT-N200','Battery N200 MF (model)','EA','6','green','4','22,500.00','135,000.00'],
+    ['SPR-01120','Coolant Hose — upper','EA','-2','red','5','640.00','-1,280.00'],
+    ['SPR-00113','Main Bearing Shell STD','EA','9','green','6','3,200.00','28,800.00']
+  ];
+  var LUBE_KPI = [
+    { label:'On-hand Value', value:'1.94M', unit:'LKR', pill:['flat','8 SKUs'], spark:[2.1,2.0,2.05,1.98,1.96,1.95,1.94,1.94], color:'--v1', foot:'Stock book', go:'view-lube' },
+    { label:'Consumed (MTD)', value:'3,120', unit:'L', pill:['up','6%'], spark:[2.4,2.6,2.7,2.9,3.0,3.05,3.1,3.12], color:'--v3', foot:'By asset', go:'view-lube' },
+    { label:'Critical SKUs', value:'2', unit:'<5d cover', pill:['down','1'], spark:[4,4,3,3,2,2,2,2], color:'--v6', foot:'Order now', go:'view-lube' },
+    { label:'Avg Days-Cover', value:'11', unit:'days', pill:['down','1d'], spark:[15,14,13,12,12,11,11,11], color:'--v4', foot:'Watchlist', go:'view-lube' }
+  ];
+  var LUBE = [
+    ['LUB-15W40','210 L','9.5 L','22 d','green','healthy'],
+    ['LUB-80W90','18 L','5.2 L','3.5 d','red','order'],
+    ['LUB-ATF','40 L','9.0 L','4.4 d','red','order'],
+    ['LUB-GREASE','55 kg','1.1 kg','50 d','green','healthy'],
+    ['LUB-COOL','120 L','6.4 L','18.7 d','green','healthy']
+  ];
+  var BATTERY = [
+    ['09-Jul-26 10:12','METER CHECK','—','WP-1123','IN_SERVICE','blue','R.Silva'],
+    ['04-Mar-26 08:30','TRANSFER','BTR-CMB-26-000014','GEN-04 → WP-1123','TRANSFERRED','teal','A.Perera'],
+    ['12-Jan-25 09:00','ISSUE TO ASSET','BAT-CMB-26-000077','(store) → GEN-04','ISSUED','blue','Store'],
+    ['10-Jan-25 14:20','GRN RECEIPT','GRN-CMB-26-000151','—','IN_STOCK','gray','Store']
+  ];
+  var TASKS = [
+    ['1','Strip & inspect engine','8','R.Silva','green','COMPLETED'],
+    ['2','Recondition cylinder head','12','K.Fernando','blue','IN_PROGRESS'],
+    ['3','Replace main bearings','6','—','purple','AWAITING_PARTS']
+  ];
+  var PARTS = [
+    ['SPR-00113','MRQ-CMB-26-000488','4 EA','3,200.00','12,800.00','ISS-CMB-26-001004','ok'],
+    ['SPR-00988','MRQ-CMB-26-000488','1 SET','8,400.00','8,400.00','reserved (inv_reservation)','wait']
+  ];
+  var LABOUR = [
+    ['R.Silva','A','05-Jul','8.0','650.00','5,200.00','LAB-CMB-26-000771'],
+    ['K.Fernando','A','09-Jul','6.5','650.00','4,225.00','LAB-CMB-26-000772']
+  ];
+  var OUTSIDE = [
+    ['Precision Machining','Crankshaft grinding','45,000.00','blue','APPROVED','OSR-CMB-26-000031']
+  ];
+  var COST = [
+    ['Material','1,300,000','1,180,400','−119,600','−9%'],
+    ['Labour','420,000','388,000','−32,000','−8%'],
+    ['Outside','80,000','45,000','−35,000','−44%'],
+    ['General','300,000','246,000','−54,000','−18%']
+  ];
+
+  /* ================= RENDER ================= */
+  function kpiCards(host, arr){
+    $(host).innerHTML = arr.map(function(k){
+      var pillCls=k.pill[0], arrow=pillCls==='up'?'▲':(pillCls==='down'?'▼':'');
+      return '<div class="card kpi">'
+        +'<div class="label">'+k.label+'</div>'
+        +'<div class="valrow"><span class="value">'+k.value+'</span>'+(k.unit?'<span class="unit">'+k.unit+'</span>':'')+'</div>'
+        +'<div><span class="pill '+pillCls+'">'+arrow+' '+k.pill[1]+'</span></div>'
+        +'<div class="spark" data-spark="'+k.spark.join(',')+'" data-color="'+k.color+'"></div>'
+        +'<div class="foot"><a data-go="'+k.go+'">'+k.foot+' →</a></div></div>';
+    }).join('');
+    $$('[data-spark]',$(host)).forEach(function(s){ s.innerHTML = spark(s.getAttribute('data-spark').split(',').map(Number), cvar(s.getAttribute('data-color'))); });
+  }
+  function queueItems(host, arr, compact){
+    $(host).innerHTML = arr.map(function(a){
+      return '<div class="qitem"><div class="qtop"><span style="color:var(--text-faint)">'+svg(a.icon,15)+'</span>'
+        +'<span class="qno">'+a.no+'</span><span class="qamt">'+ (a.amt?('LKR '+a.amt):'') +'</span></div>'
+        +'<div class="qmeta">'+a.ttl+'</div>'
+        +'<div class="qmeta"><span>'+a.by+' · '+a.site+'</span><span class="chip '+chipColor(a.step)+'" style="padding:1px 8px"><span class="cdot"></span>'+human(a.step)+'</span><span class="age '+a.ageC+'" style="margin-left:auto">'+(a.sla?'🔴 ':'')+a.age+'</span></div>'
+        +'<div class="qacts"><button class="btn primary sm">Approve</button><button class="btn sm">Return</button><button class="btn danger sm">Reject</button></div></div>';
+    }).join('');
+  }
+  function chipColor(status){
+    var s=status.toUpperCase();
+    if(/DRAFT|IN_STOCK/.test(s)) return 'gray';
+    if(/PENDING|SUBMITTED|RECEIVED|PROVISIONAL|QC_PENDING|RETURN$/.test(s)) return 'amber';
+    if(/APPROVED|IN_PROGRESS|ASSIGNED|ISSUED|PRICED|QC_PASSED/.test(s)) return 'blue';
+    if(/POSTED|CLOSED|CONFIRMED|COMPLETED|REPAIRED|REPLACED/.test(s)) return 'green';
+    if(/REJECT|OVERDUE|CANCEL|SCRAP|LOST|FAILED/.test(s)) return 'red';
+    if(/HOLD|AWAITING|RETURNED|WARRANTY/.test(s)) return 'purple';
+    if(/TRANSFER|ESCALAT|DELEGAT/.test(s)) return 'teal';
+    return 'gray';
+  }
+  function human(s){ return s.replace(/_/g,' ').replace('PENDING ','Pending ').replace(/\b\w/g,function(c){return c;}); }
+  function chip(status, txt){ return '<span class="chip '+chipColor(status)+'"><span class="cdot"></span>'+(txt||status)+'</span>'; }
+
+  kpiCards('#execKpis', EXEC_KPI);
+  queueItems('#execQueue', APPR);
+  kpiCards('#lubeKpis', LUBE_KPI);
+  $('#execOverdue').innerHTML = OVERDUE.map(function(o){
+    return '<div class="qitem"><div class="qtop"><span class="qno">'+o.no+'</span><span class="qamt">'+chip(o.chip[1])+'</span></div><div class="qmeta">'+o.txt+' <button class="btn sm" style="margin-left:auto" data-go="view-workshop">Open</button></div></div>';
+  }).join('');
+
+  $('#storesTable').innerHTML =
+    '<thead><tr><th>Item Code</th><th>Description</th><th>UoM</th><th class="r">On Hand</th><th class="r">ROL</th><th class="r">MWAC</th><th class="r">Value</th><th></th></tr></thead><tbody>'
+    + STORES.map(function(r){ return '<tr><td class="mono">'+r[0]+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td>'
+        +'<td class="r"><span class="ohtag oh-'+r[4]+'">'+r[3]+'</span></td><td class="r mono">'+r[5]+'</td><td class="r mono">'+r[6]+'</td><td class="r mono">'+r[7]+'</td>'
+        +'<td class="r"><a>Ledger</a></td></tr>'; }).join('') + '</tbody>';
+
+  $('#lubeTable').innerHTML =
+    '<thead><tr><th>SKU</th><th class="r">On-hand</th><th class="r">Avg/day</th><th class="r">Days-left</th><th>Status</th></tr></thead><tbody>'
+    + LUBE.map(function(r){ return '<tr><td class="mono">'+r[0]+'</td><td class="r mono">'+r[1]+'</td><td class="r mono">'+r[2]+'</td><td class="r mono">'+r[3]+'</td><td>'+chip(r[4]==='red'?'ORDER':'HEALTHY', r[5])+'</td></tr>'; }).join('')
+    + '</tbody>';
+
+  $('#batteryTable').innerHTML =
+    '<thead><tr><th>When</th><th>Event</th><th>Doc</th><th>From → To</th><th>Status</th><th>By</th></tr></thead><tbody>'
+    + BATTERY.map(function(r){ return '<tr><td class="mono">'+r[0]+'</td><td style="font-weight:600">'+r[1]+'</td><td class="mono"><a>'+r[2]+'</a></td><td class="mono">'+r[3]+'</td><td>'+chip(r[4])+'</td><td>'+r[6]+'</td></tr>'; }).join('')
+    + '</tbody>';
+
+  $('#taskTable').innerHTML =
+    '<thead><tr><th>#</th><th>Task</th><th class="r">Est hrs</th><th>Assigned</th><th>Status</th></tr></thead><tbody>'
+    + TASKS.map(function(r){ return '<tr><td class="mono">'+r[0]+'</td><td>'+r[1]+'</td><td class="r mono">'+r[2]+'</td><td>'+r[3]+'</td><td>'+chip(r[5])+'</td></tr>'; }).join('') + '</tbody>';
+
+  $('#partsTable').innerHTML =
+    '<thead><tr><th>Item</th><th>Req (MRQ)</th><th class="r">Issued</th><th class="r">Unit cost</th><th class="r">Amount</th><th>Source</th></tr></thead><tbody>'
+    + PARTS.map(function(r){ var wait=r[6]==='wait'; return '<tr><td class="mono">'+r[0]+'</td><td class="mono">'+r[1]+'</td><td class="r mono">'+(wait?'<span class="chip purple" style="padding:1px 7px"><span class="cdot"></span>AWAITING</span>':r[2])+'</td><td class="r mono">'+r[3]+'</td><td class="r mono">'+r[4]+'</td><td class="mono" style="font-size:12px;color:var(--text-muted)">'+r[5]+'</td></tr>'; }).join('') + '</tbody>';
+
+  $('#labourTable').innerHTML =
+    '<thead><tr><th>Technician</th><th>Grade</th><th>Date</th><th class="r">Hrs</th><th class="r">Rate</th><th class="r">Amount</th><th>Doc</th></tr></thead><tbody>'
+    + LABOUR.map(function(r){ return '<tr><td>'+r[0]+'</td><td class="mono">'+r[1]+'</td><td class="mono">'+r[2]+'</td><td class="r mono">'+r[3]+'</td><td class="r mono">'+r[4]+'</td><td class="r mono">'+r[5]+'</td><td class="mono"><a>'+r[6]+'</a></td></tr>'; }).join('') + '</tbody>';
+
+  $('#outTable').innerHTML =
+    '<thead><tr><th>Vendor</th><th>Description</th><th class="r">Amount</th><th>Status</th><th>Doc</th></tr></thead><tbody>'
+    + OUTSIDE.map(function(r){ return '<tr><td>'+r[0]+'</td><td>'+r[1]+'</td><td class="r mono">'+r[2]+'</td><td>'+chip(r[4])+'</td><td class="mono"><a>'+r[5]+'</a></td></tr>'; }).join('') + '</tbody>';
+
+  $('#costTable').innerHTML =
+    '<thead><tr><th>Element</th><th class="r">Estimated</th><th class="r">Actual</th><th class="r">Variance</th><th class="r">%</th></tr></thead><tbody>'
+    + COST.map(function(r){ return '<tr><td style="font-weight:600">'+r[0]+'</td><td class="r mono">'+r[1]+'</td><td class="r mono">'+r[2]+'</td><td class="r mono" style="color:var(--success)">'+r[3]+'</td><td class="r mono" style="color:var(--success)">'+r[4]+'</td></tr>'; }).join('')
+    + '<tr style="border-top:2px solid var(--border-strong)"><td style="font-weight:800">TOTAL</td><td class="r mono" style="font-weight:800">2,100,000</td><td class="r mono" style="font-weight:800">1,859,400</td><td class="r mono" style="font-weight:800;color:var(--success)">−240,600</td><td class="r mono" style="font-weight:800;color:var(--success)">−11%</td></tr>'
+    + '</tbody>';
+
+  $('#closeList').innerHTML = [
+    ['ok','All approvals complete','TM ✓ · OM ⏳ pending'],
+    ['no','Parts received / accounted','1 part AWAITING (SPR-00988)'],
+    ['ok','Prices entered','0 rows in inv_pending_price'],
+    ['ok','Labour captured','2 sheets · 14.5 h'],
+    ['ok','Outside repair costed','OSR-CMB-26-000031'],
+    ['no','OM approval','PENDING_OM_APPROVAL']
+  ].map(function(c){ return '<li class="'+c[0]+'"><span class="mk">'+(c[0]==='ok'?'✓':'!')+'</span><span>'+c[1]+' <span style="color:var(--text-faint);font-size:12px">— '+c[2]+'</span></span></li>'; }).join('');
+
+  $('#progTimeline').innerHTML = [
+    ['09-Jul 16:00','60% · "Head reconditioned, awaiting bearings" → status AWAITING_PARTS (MRQ-CMB-26-000488 raised)','K.Fernando',false],
+    ['05-Jul 11:20','35% · "Engine stripped, block OK"','R.Silva',true],
+    ['02-Jul 09:00','Job APPROVED → ASSIGNED_WORKSHOP','Transport Office',true]
+  ].map(function(t){ return '<div class="tnode'+(t[3]?' done':'')+'"><div class="twhen">'+t[0]+'</div><div class="twhat">'+t[1]+'</div><div class="twho">'+t[2]+'</div></div>'; }).join('');
+
+  $('#apprQueue').innerHTML = APPR.concat([
+    { icon:'box', no:'ADJ-KND-26-000012', ttl:'Stock write-off · damaged filters', amt:'0.02M', by:'S.Kumara', site:'KND', step:'PENDING_TM_APPROVAL', age:'2h', ageC:'a' }
+  ]).map(function(a){
+    return '<div class="qitem" style="padding:13px 16px"><div class="qtop"><span style="color:var(--text-faint)">'+svg(a.icon,16)+'</span><span class="qno">'+a.no+'</span> <span style="color:var(--text-muted)">'+a.ttl+'</span><span class="qamt">LKR '+a.amt+'</span></div>'
+      +'<div class="qmeta"><span>Requested by '+a.by+' · '+a.site+'</span>'+chip(a.step)+'<span class="age '+a.ageC+'" style="margin-left:auto">'+(a.sla?'🔴 SLA breach · ':'')+a.age+'</span></div>'
+      +'<div class="qacts"><button class="btn primary sm">✓ Approve</button><button class="btn sm">⤺ Return</button><button class="btn danger sm">✖ Reject</button></div></div>';
+  }).join('');
+
+  /* charts (redrawable on theme change) */
+  function redrawCharts(){
+    if($('#chartStockVal')) $('#chartStockVal').innerHTML = areaChart([41,42.5,43,45,44,46.2,47,48.6],{color:cvar('--v1'),labels:['Feb','Mar','Apr','May','Jun','Jul'],h:150});
+    if($('#chartJobs')) $('#chartJobs').innerHTML = groupBars([{values:[28,32,30,35,33,31],color:cvar('--v1')},{values:[24,27,29,30,34,35],color:cvar('--v2')}],['Feb','Mar','Apr','May','Jun','Jul'],{h:150}) + '<div class="legend"><span><i style="background:var(--v1)"></i>Created</span><span><i style="background:var(--v2)"></i>Closed</span></div>';
+    if($('#chartMix')) $('#chartMix').innerHTML = donut([
+      {label:'Spares',value:42,color:cvar('--v1')},{label:'Lubricant',value:18,color:cvar('--v3')},{label:'Battery',value:12,color:cvar('--v5')},{label:'General',value:16,color:cvar('--v4')},{label:'Consumable',value:12,color:cvar('--v2')}
+    ],{center:'48.6M',sub:'LKR'});
+    if($('#chartStatus')) $('#chartStatus').innerHTML = stacked([
+      {label:'DRAFT',value:3,color:cvar('--gray')},{label:'PENDING',value:6,color:cvar('--v3')},{label:'IN_PROGRESS',value:18,color:cvar('--v1')},{label:'AWAITING',value:6,color:cvar('--v4')},{label:'COMPLETED',value:4,color:cvar('--v2')}
+    ]);
+    if($('#chartLube')) $('#chartLube').innerHTML = areaChart([88,102,96,140,118,150,132,120,110,145,138,126],{color:cvar('--v3'),h:130});
+    if($('#chartLubeAsset')) $('#chartLubeAsset').innerHTML = hbars([
+      {label:'WP-1123',value:640,disp:'640 L',color:cvar('--v1')},{label:'GEN-04',value:520,disp:'520 L',color:cvar('--v2')},{label:'TR-2290',value:410,disp:'410 L',color:cvar('--v3')},{label:'WP-1130',value:300,disp:'300 L',color:cvar('--v4')},{label:'GEN-07',value:250,disp:'250 L',color:cvar('--v5')},{label:'TR-2281',value:180,disp:'180 L',color:cvar('--v6')}
+    ]);
+  }
+  redrawCharts();
+
+  /* keyboard: '/' focuses search */
+  document.addEventListener('keydown', function(e){ if(e.key==='/' && document.activeElement.tagName!=='INPUT'){ e.preventDefault(); var i=$('.search input'); if(i) i.focus(); } });
+})();
+</script>
+</body>
+</html>

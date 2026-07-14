@@ -1,0 +1,875 @@
+--- server.orig.js	2026-07-09 14:38:18.825564949 +0000
++++ server.js	2026-07-10 03:43:32.845330917 +0000
+@@ -24,15 +24,70 @@
+ const app = express();
+ const PORT = process.env.PORT || 5000;
+ 
++// [UMMS] Behind a TLS-terminating reverse proxy, trust it so client IPs (audit log,
++// rate limiter) and req.secure are correct. Env-gated: no effect unless TRUST_PROXY is set.
++if (process.env.TRUST_PROXY) app.set('trust proxy', Number(process.env.TRUST_PROXY) || 1);
++
+ app.use(express.json({ limit: '100mb' }));
+ 
++// --- UMMS auth (replaces the hard-coded delete password) ---
++const cookieParser = require('cookie-parser');
++app.use(cookieParser());
++const { cors } = require('./auth/cors');
++app.use(cors);                                    // env-configured CORS allow-list (default: same-origin only)
++require('./auth/schema').ensure();
++const authRoutes = require('./auth/routes');
++const { authMiddleware } = require('./auth/authMiddleware');
++const { requirePerm, scopeWhere } = require('./auth/rbac');
++const { auditChange } = require('./auth/auditChange');
++const { enforceSite } = require('./auth/siteGuard');
++const requireAuthPerm = (code) => [authMiddleware, requirePerm(code), enforceSite];
++app.use('/auth', authRoutes);
++// [UMMS] unauthenticated liveness probe for container/reverse-proxy health checks.
++app.get('/health', (req, res) => res.json({ ok: true, service: 'umms-storesdb' }));
++
++// [UMMS] site-scope splice helpers for read queries.
++//   andSite   -> ' AND <alias>.site_id IN (?)'  (for a query that already has a WHERE)
++//   whereSite -> ' WHERE <alias>.site_id IN (?)' (for a query with no WHERE)
++// Both return '' for all-site users (admins / READ.ALL_SITES) so the query is unchanged.
++const andSite   = (req, alias) => { const s = scopeWhere(req, alias); return { sql: s.cond ? ` AND ${s.cond}` : '',   params: s.params }; };
++const whereSite = (req, alias) => { const s = scopeWhere(req, alias); return { sql: s.cond ? ` WHERE ${s.cond}` : '', params: s.params }; };
++
++// [UMMS] gate all /api requests. Reads require a valid session (so results can be
++// site-scoped and nothing leaks to the unauthenticated); mutations additionally need
++// the mapped permission; DELETE routes carry their own requireAuthPerm inline.
++function permForMutation(req) {
++  const p = (req.baseUrl || '') + req.path;
++  if (/^\/api\/receipts\//.test(p)) return 'STORES.PRICE';   // updating a receipt = pricing / GRN
++  if (/^\/api\/issues/.test(p))      return 'STORES.ISSUE';
++  if (/^\/api\/transfers/.test(p))   return 'STORES.TRANSFER';
++  return 'STORES.WRITE';                                        // create/update items, batteries, general items, imports
++}
++app.use('/api', (req, res, next) => {
++  const m = req.method;
++  if (m === 'OPTIONS' || m === 'DELETE') return next();        // delete routes gate themselves
++  authMiddleware(req, res, () => {                             // all reads + writes require a session
++    if (m === 'GET' || m === 'HEAD') return next();            // read: authenticated, then site-scoped in-route
++    return requirePerm(permForMutation(req))(req, res, () =>   // write: needs the permission...
++      enforceSite(req, res, next));                            // ...and may not target another site's row
++  });
++});
++// [UMMS] append-only audit trail for every mutation (who + when + before/after).
++app.use('/api', auditChange);
++// [UMMS] serve the tracker UI only to authenticated users
++function isAuthed(req) {
++  const t = req.cookies && req.cookies.umms_sid;
++  return !!(t && dbApi.get('SELECT 1 AS ok FROM sessions WHERE token=? AND expires_at>?', [t, new Date().toISOString()]));
++}
++app.get('/item_tracker.html', (req, res, next) => (isAuthed(req) ? next() : res.redirect('/login.html')));
++
+ // Disable caching for API routes to ensure network clients always get fresh data
+ app.use('/api', (req, res, next) => {
+     res.setHeader('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+     next();
+ });
+ app.use(express.static(__dirname));
+-app.get('/', (req, res) => res.redirect('/item_tracker.html'));
++app.get('/', (req, res) => res.redirect(isAuthed(req) ? '/item_tracker.html' : '/login.html'));
+ 
+ // --- helpers ----------------------------------------------------------------
+ const s = (v) => (v === null || v === undefined) ? '' : String(v);
+@@ -51,9 +106,13 @@
+ };
+ 
+ // Build the item-level WHERE clause shared by list + count queries.
+-function buildItemWhere(q) {
++// Takes the request so the row-level site scope is folded into the same clause.
++function buildItemWhere(req) {
++    const q = req.query;
+     const where = [];
+     const params = [];
++    const sc = scopeWhere(req, 'i');
++    if (sc.cond) { where.push(sc.cond); params.push(...sc.params); }
+     if (q.search) {
+         const like = `%${q.search}%`;
+         where.push(`(i.mrnNum LIKE ? OR i.itemName LIKE ? OR i.vehicleMachinery LIKE ? OR i.itemDesc LIKE ? OR i.category LIKE ? OR EXISTS(SELECT 1 FROM receipts rr WHERE rr.itemId=i.id AND (rr.grnNumber LIKE ? OR rr.invoiceNumber LIKE ? OR rr.supplierName LIKE ?)))`);
+@@ -108,11 +167,13 @@
+ 
+         // Unpaginated: return the whole dataset (used by dashboard/fleet/dropdowns).
+         if (!page || !limit) {
+-            const items = dbApi.all(`SELECT ${computed} FROM items i ORDER BY i.reqDateISO DESC, i.id DESC`);
++            const sc = scopeWhere(req, 'i');
++            const w = sc.cond ? `WHERE ${sc.cond}` : '';
++            const items = dbApi.all(`SELECT ${computed} FROM items i ${w} ORDER BY i.reqDateISO DESC, i.id DESC`, sc.params);
+             return res.json(attachReceipts(items));
+         }
+ 
+-        const { clause, params } = buildItemWhere(req.query);
++        const { clause, params } = buildItemWhere(req);
+         const tab = filterTabClause(req.query.filter);
+         const outerWhere = tab ? `WHERE ${tab}` : '';
+ 
+@@ -175,17 +236,10 @@
+     }
+ });
+ 
+-// Middleware to verify deletion password
+-const verifyDeletePassword = (req, res, next) => {
+-    const password = req.headers['x-delete-password'] || req.query.password;
+-    if (password !== 'E&CWorkshop') {
+-        return res.status(403).json({ error: 'Unauthorized: Incorrect delete password.' });
+-    }
+-    next();
+-};
++// [UMMS] legacy delete-password check removed — deletes now require real auth + STORES.DELETE permission.
+ 
+ // 4. DELETE /api/items/:id  (cascades receipts)
+-app.delete('/api/items/:id', verifyDeletePassword, (req, res) => {
++app.delete('/api/items/:id', ...requireAuthPerm('STORES.DELETE'), (req, res) => {
+     try {
+         const id = parseInt(req.params.id);
+         dbApi.transaction(() => {
+@@ -249,7 +303,7 @@
+ });
+ 
+ // 7. DELETE /api/receipts/:id
+-app.delete('/api/receipts/:id', verifyDeletePassword, (req, res) => {
++app.delete('/api/receipts/:id', ...requireAuthPerm('STORES.DELETE'), (req, res) => {
+     try {
+         dbApi.run(`DELETE FROM receipts WHERE id=?`, [parseInt(req.params.id)]);
+         res.json({ success: true });
+@@ -265,6 +319,7 @@
+     try {
+         const where = [];
+         const params = [];
++        { const sc = scopeWhere(req); if (sc.cond) { where.push(sc.cond); params.push(...sc.params); } }
+         if (req.query.search) {
+             const like = `%${req.query.search}%`;
+             where.push(`(vehicleMachinery LIKE ? OR itemName LIKE ? OR itemDesc LIKE ? OR issuedTo LIKE ? OR issuedBy LIKE ? OR mrnNum LIKE ? OR category LIKE ?)`);
+@@ -326,7 +381,7 @@
+     }
+ });
+ 
+-app.delete('/api/issues/:id', verifyDeletePassword, (req, res) => {
++app.delete('/api/issues/:id', ...requireAuthPerm('STORES.DELETE'), (req, res) => {
+     try {
+         dbApi.run(`DELETE FROM issues WHERE id=?`, [parseInt(req.params.id)]);
+         res.json({ success: true });
+@@ -340,15 +395,16 @@
+ // ===========================================================================
+ app.get('/api/vehicles', (req, res) => {
+     try {
++        const a = andSite(req);                       // same site column on all three tables
+         const rows = dbApi.all(`
+-            SELECT DISTINCT TRIM(vehicleMachinery) AS v FROM items WHERE TRIM(COALESCE(vehicleMachinery,'')) != ''
++            SELECT DISTINCT TRIM(vehicleMachinery) AS v FROM items WHERE TRIM(COALESCE(vehicleMachinery,'')) != ''${a.sql}
+             UNION
+-            SELECT DISTINCT TRIM(vehicleMachinery) AS v FROM issues WHERE TRIM(COALESCE(vehicleMachinery,'')) != ''
++            SELECT DISTINCT TRIM(vehicleMachinery) AS v FROM issues WHERE TRIM(COALESCE(vehicleMachinery,'')) != ''${a.sql}
+             UNION
+-            SELECT DISTINCT TRIM(fromLocation) AS v FROM material_transfers WHERE TRIM(COALESCE(fromLocation,'')) != ''
++            SELECT DISTINCT TRIM(fromLocation) AS v FROM material_transfers WHERE TRIM(COALESCE(fromLocation,'')) != ''${a.sql}
+             UNION
+-            SELECT DISTINCT TRIM(toLocation) AS v FROM material_transfers WHERE TRIM(COALESCE(toLocation,'')) != ''
+-            ORDER BY v COLLATE NOCASE`);
++            SELECT DISTINCT TRIM(toLocation) AS v FROM material_transfers WHERE TRIM(COALESCE(toLocation,'')) != ''${a.sql}
++            ORDER BY v COLLATE NOCASE`, [...a.params, ...a.params, ...a.params, ...a.params]);
+         res.json(rows.map(r => r.v));
+     } catch (e) {
+         res.status(500).json({ error: e.message });
+@@ -358,7 +414,8 @@
+ app.get('/api/categories', (req, res) => {
+     try {
+         const counts = {};
+-        dbApi.all(`SELECT COALESCE(category,'General Items') AS category, COUNT(*) AS c FROM items GROUP BY COALESCE(category,'General Items')`)
++        const ws = whereSite(req);
++        dbApi.all(`SELECT COALESCE(category,'General Items') AS category, COUNT(*) AS c FROM items${ws.sql} GROUP BY COALESCE(category,'General Items')`, ws.params)
+             .forEach(r => { counts[r.category] = r.c; });
+         res.json({ categories: CATEGORIES, counts });
+     } catch (e) {
+@@ -376,6 +433,7 @@
+         const today = new Date().toISOString().split('T')[0];
+         const where = [];
+         const params = [];
++        { const sc = scopeWhere(req); if (sc.cond) { where.push(sc.cond); params.push(...sc.params); } }
+         if (req.query.search) {
+             const like = `%${req.query.search}%`;
+             where.push(`(serialNumber LIKE ? OR itemName LIKE ? OR brand LIKE ? OR itemDesc LIKE ? OR currentVehicle LIKE ? OR notes LIKE ?)`);
+@@ -422,8 +480,8 @@
+                 COUNT(CASE WHEN condition = 'Old' AND state = 'In Store' THEN 1 END) AS oldInStore,
+                 COUNT(CASE WHEN condition = 'Expired' OR (expiryDateISO != '' AND expiryDateISO <= ?) THEN 1 END) AS expired,
+                 COUNT(CASE WHEN state = 'Installed' THEN 1 END) AS installed
+-            FROM batteries
+-        `, [today]);
++            FROM batteries${whereSite(req).sql}
++        `, [today, ...whereSite(req).params]);
+         res.json(stats);
+     } catch (e) {
+         res.status(500).json({ error: e.message });
+@@ -433,7 +491,8 @@
+ app.get('/api/batteries/:id', (req, res) => {
+     try {
+         const id = parseInt(req.params.id);
+-        const battery = dbApi.get(`SELECT * FROM batteries WHERE id = ?`, [id]);
++        const a = andSite(req);
++        const battery = dbApi.get(`SELECT * FROM batteries WHERE id = ?${a.sql}`, [id, ...a.params]);
+         if (!battery) return res.status(404).json({ error: 'Battery not found' });
+         const movements = dbApi.all(`SELECT * FROM battery_movements WHERE batteryId = ? ORDER BY movementDateISO DESC, id DESC`, [id]);
+         battery.movements = movements;
+@@ -618,7 +677,7 @@
+     }
+ });
+ 
+-app.delete('/api/batteries/:id', verifyDeletePassword, (req, res) => {
++app.delete('/api/batteries/:id', ...requireAuthPerm('STORES.DELETE'), (req, res) => {
+     try {
+         const id = parseInt(req.params.id);
+         dbApi.transaction(() => {
+@@ -639,6 +698,7 @@
+ 
+ app.get('/api/active-items', (req, res) => {
+     try {
++        const ws = whereSite(req, 'i');
+         const rows = dbApi.all(`
+             WITH item_rec_iss AS (
+                 SELECT 
+@@ -661,11 +721,11 @@
+                         )
+                         AND LOWER(TRIM(iss.itemName)) = LOWER(TRIM(i.itemName))
+                     ), 0) AS issuedQty
+-                FROM items i
++                FROM items i${ws.sql}
+             )
+             SELECT * FROM item_rec_iss
+             WHERE recQty > 0 AND issuedQty < recQty
+-        `);
++        `, ws.params);
+         res.json(rows);
+     } catch (e) {
+         res.status(500).json({ error: e.message });
+@@ -674,11 +734,13 @@
+ 
+ app.get('/api/fleet', (req, res) => {
+     try {
++        const a = andSite(req);        // bare site_id (items / issues in the vehicle list)
++        const ai = andSite(req, 'i');  // aliased site_id (item_stats scan)
+         const rows = dbApi.all(`
+             WITH all_vehicles AS (
+-                SELECT DISTINCT TRIM(vehicleMachinery) AS vehicle FROM items WHERE TRIM(COALESCE(vehicleMachinery, '')) != ''
++                SELECT DISTINCT TRIM(vehicleMachinery) AS vehicle FROM items WHERE TRIM(COALESCE(vehicleMachinery, '')) != ''${a.sql}
+                 UNION
+-                SELECT DISTINCT TRIM(vehicleMachinery) AS vehicle FROM issues WHERE TRIM(COALESCE(vehicleMachinery, '')) != ''
++                SELECT DISTINCT TRIM(vehicleMachinery) AS vehicle FROM issues WHERE TRIM(COALESCE(vehicleMachinery, '')) != ''${a.sql}
+             ),
+             item_stats AS (
+                 SELECT 
+@@ -692,7 +754,7 @@
+                     CASE WHEN i.reqQty > COALESCE((SELECT SUM(qty) FROM receipts r WHERE r.itemId = i.id), 0) AND TRIM(COALESCE(i.reqDateISO, '')) != '' AND i.reqDateISO < DATE('now', 'localtime') THEN 1 ELSE 0 END AS is_overdue,
+                     1 AS item_line
+                 FROM items i
+-                WHERE TRIM(COALESCE(i.vehicleMachinery, '')) != ''
++                WHERE TRIM(COALESCE(i.vehicleMachinery, '')) != ''${ai.sql}
+             ),
+             vehicle_agg AS (
+                 SELECT 
+@@ -721,7 +783,7 @@
+             FROM all_vehicles av
+             LEFT JOIN vehicle_agg va ON av.vehicle = va.name
+             ORDER BY av.vehicle COLLATE NOCASE ASC
+-        `);
++        `, [...a.params, ...a.params, ...ai.params]);
+         res.json(rows);
+     } catch (e) {
+         res.status(500).json({ error: e.message });
+@@ -733,16 +795,18 @@
+         const veh = req.query.vehicle;
+         if (!veh) return res.status(400).json({ error: 'Vehicle name is required' });
+         const trimVeh = veh.trim();
++        const ai = andSite(req, 'i');
++        const a = andSite(req);
+ 
+         // Get items for vehicle
+         const items = dbApi.all(`
+-            SELECT 
++            SELECT
+                 i.*,
+                 COALESCE((SELECT SUM(qty) FROM receipts r WHERE r.itemId = i.id), 0) AS recQty
+             FROM items i
+-            WHERE TRIM(i.vehicleMachinery) = ?
++            WHERE TRIM(i.vehicleMachinery) = ?${ai.sql}
+             ORDER BY i.id DESC
+-        `, [trimVeh]);
++        `, [trimVeh, ...ai.params]);
+ 
+         // Prefill receipts for items
+         const itemIds = items.map(item => item.id);
+@@ -760,10 +824,10 @@
+         
+         const issues = dbApi.all(`
+             SELECT * FROM issues
+-            WHERE TRIM(vehicleMachinery) = ?
++            WHERE TRIM(vehicleMachinery) = ?${a.sql}
+             ORDER BY issueDateISO DESC, id DESC
+-        `, [trimVeh]);
+-        
++        `, [trimVeh, ...a.params]);
++
+         res.json({ items, issues });
+     } catch (e) {
+         res.status(500).json({ error: e.message });
+@@ -772,17 +836,18 @@
+ 
+ app.get('/api/open-mrns', (req, res) => {
+     try {
++        const a = andSite(req);
+         const rows = dbApi.all(`
+-            SELECT 
++            SELECT
+                 mrnNum,
+                 COUNT(*) AS count,
+                 MAX(vehicleMachinery) AS vehicle
+             FROM items
+             WHERE reqQty > (SELECT COALESCE(SUM(qty), 0) FROM receipts WHERE itemId = items.id)
+-              AND TRIM(COALESCE(mrnNum, '')) != ''
++              AND TRIM(COALESCE(mrnNum, '')) != ''${a.sql}
+             GROUP BY mrnNum
+             ORDER BY mrnNum ASC
+-        `);
++        `, a.params);
+         res.json(rows);
+     } catch (e) {
+         res.status(500).json({ error: e.message });
+@@ -791,12 +856,14 @@
+ 
+ app.get('/api/sidebar-stats', (req, res) => {
+     try {
+-        const totalItems = dbApi.get(`SELECT COUNT(*) AS c FROM items`).c;
++        const wsBare = whereSite(req);
++        const aI = andSite(req, 'i');
++        const totalItems = dbApi.get(`SELECT COUNT(*) AS c FROM items${wsBare.sql}`, wsBare.params).c;
+         const pendingDelivery = dbApi.get(`
+-            SELECT COUNT(*) AS c 
+-            FROM items i 
+-            WHERE i.reqQty > (SELECT COALESCE(SUM(qty), 0) FROM receipts r WHERE r.itemId = i.id)
+-        `).c;
++            SELECT COUNT(*) AS c
++            FROM items i
++            WHERE i.reqQty > (SELECT COALESCE(SUM(qty), 0) FROM receipts r WHERE r.itemId = i.id)${aI.sql}
++        `, aI.params).c;
+ 
+         const pendingPricing = dbApi.get(`
+             WITH item_pricing AS (
+@@ -806,15 +873,15 @@
+                     MAX(CASE WHEN r.unitPrice IS NULL OR r.unitPrice = 0 THEN 1 ELSE 0 END) AS has_unpriced,
+                     COUNT(r.id) AS recCount
+                 FROM items i
+-                LEFT JOIN receipts r ON r.itemId = i.id
++                LEFT JOIN receipts r ON r.itemId = i.id${whereSite(req, 'i').sql}
+                 GROUP BY i.id
+             )
+-            SELECT COUNT(*) AS c 
++            SELECT COUNT(*) AS c
+             FROM item_pricing
+-            WHERE recQty >= (SELECT reqQty FROM items WHERE id = itemId) 
+-              AND recCount > 0 
++            WHERE recQty >= (SELECT reqQty FROM items WHERE id = itemId)
++              AND recCount > 0
+               AND has_unpriced = 1
+-        `).c;
++        `, whereSite(req, 'i').params).c;
+ 
+         // Stock room in-stock items:
+         // We want to count distinct SKUs with currentStock > 0
+@@ -823,13 +890,13 @@
+                 SELECT LOWER(TRIM(i.itemName)) AS cleanName, SUM(r.qty) AS totalReceived
+                 FROM items i
+                 JOIN receipts r ON r.itemId = i.id
+-                WHERE r.qty > 0
++                WHERE r.qty > 0${andSite(req, 'i').sql}
+                 GROUP BY LOWER(TRIM(i.itemName))
+             ),
+             issued_totals AS (
+                 SELECT LOWER(TRIM(itemName)) AS cleanName, SUM(qty) AS totalIssued
+                 FROM issues
+-                WHERE qty > 0
++                WHERE qty > 0${andSite(req).sql}
+                 GROUP BY LOWER(TRIM(itemName))
+             ),
+             all_names AS (
+@@ -842,9 +909,9 @@
+             LEFT JOIN received_totals r ON an.cleanName = r.cleanName
+             LEFT JOIN issued_totals i ON an.cleanName = i.cleanName
+             WHERE (COALESCE(r.totalReceived, 0) - COALESCE(i.totalIssued, 0)) > 0
+-        `).c;
++        `, [...andSite(req, 'i').params, ...andSite(req).params]).c;
+ 
+-        const totalIssues = dbApi.get(`SELECT COUNT(*) AS c FROM issues`).c;
++        const totalIssues = dbApi.get(`SELECT COUNT(*) AS c FROM issues${whereSite(req).sql}`, whereSite(req).params).c;
+ 
+         res.json({
+             totalItems,
+@@ -860,40 +927,42 @@
+ 
+ app.get('/api/dashboard/summary', (req, res) => {
+     try {
++        const a = andSite(req);        // bare site_id (receipts)
++        const aI = andSite(req, 'i');  // aliased site_id (items)
+         const spendRow = dbApi.get(`
+-            SELECT COALESCE(SUM(qty * unitPrice), 0) AS totalSpend 
+-            FROM receipts 
+-            WHERE qty > 0 AND unitPrice > 0
+-        `);
++            SELECT COALESCE(SUM(qty * unitPrice), 0) AS totalSpend
++            FROM receipts
++            WHERE qty > 0 AND unitPrice > 0${a.sql}
++        `, a.params);
+         const totalSpend = spendRow.totalSpend;
+ 
+         const supplierCount = dbApi.get(`
+-            SELECT COUNT(DISTINCT supplierName) AS c 
+-            FROM receipts 
+-            WHERE supplierName IS NOT NULL AND supplierName != '' AND qty > 0 AND unitPrice > 0
+-        `).c;
++            SELECT COUNT(DISTINCT supplierName) AS c
++            FROM receipts
++            WHERE supplierName IS NOT NULL AND supplierName != '' AND qty > 0 AND unitPrice > 0${a.sql}
++        `, a.params).c;
+ 
+         const pricedCount = dbApi.get(`
+-            SELECT COUNT(DISTINCT itemId) AS c 
+-            FROM receipts 
+-            WHERE qty > 0 AND unitPrice > 0
+-        `).c;
++            SELECT COUNT(DISTINCT itemId) AS c
++            FROM receipts
++            WHERE qty > 0 AND unitPrice > 0${a.sql}
++        `, a.params).c;
+ 
+         const unpricedReceivedCount = dbApi.get(`
+-            SELECT COUNT(DISTINCT i.id) AS c 
++            SELECT COUNT(DISTINCT i.id) AS c
+             FROM items i
+             WHERE (SELECT COALESCE(SUM(qty), 0) FROM receipts r WHERE r.itemId = i.id) > 0
+-              AND NOT EXISTS (SELECT 1 FROM receipts r WHERE r.itemId = i.id AND r.qty > 0 AND r.unitPrice > 0)
+-        `).c;
++              AND NOT EXISTS (SELECT 1 FROM receipts r WHERE r.itemId = i.id AND r.qty > 0 AND r.unitPrice > 0)${aI.sql}
++        `, aI.params).c;
+ 
+         const supplierSpendRows = dbApi.all(`
+-            SELECT 
++            SELECT
+                 COALESCE(supplierName, 'Unknown Supplier') AS supplier,
+                 SUM(qty * unitPrice) AS total
+             FROM receipts
+-            WHERE qty > 0 AND unitPrice > 0
++            WHERE qty > 0 AND unitPrice > 0${a.sql}
+             GROUP BY COALESCE(supplierName, 'Unknown Supplier')
+-        `);
++        `, a.params);
+         const supplierSpend = {};
+         supplierSpendRows.forEach(r => {
+             supplierSpend[r.supplier] = r.total;
+@@ -913,14 +982,15 @@
+ 
+ app.get('/api/dashboard/charts', (req, res) => {
+     try {
++        const a = andSite(req);
+         const spendTrend = dbApi.all(`
+             SELECT deliveryDateISO AS date, SUM(qty * unitPrice) AS dailyTotal
+             FROM receipts
+-            WHERE qty > 0 AND unitPrice > 0 AND TRIM(COALESCE(deliveryDateISO, '')) != ''
++            WHERE qty > 0 AND unitPrice > 0 AND TRIM(COALESCE(deliveryDateISO, '')) != ''${a.sql}
+             GROUP BY deliveryDateISO
+             ORDER BY deliveryDateISO ASC
+-        `);
+-        
++        `, a.params);
++
+         let cumulative = 0;
+         const trend = spendTrend.map(row => {
+             cumulative += row.dailyTotal;
+@@ -930,10 +1000,10 @@
+         const supplierSpend = dbApi.all(`
+             SELECT TRIM(supplierName) AS supplier, SUM(qty * unitPrice) AS total
+             FROM receipts
+-            WHERE qty > 0 AND unitPrice > 0 AND TRIM(COALESCE(supplierName, '')) != ''
++            WHERE qty > 0 AND unitPrice > 0 AND TRIM(COALESCE(supplierName, '')) != ''${a.sql}
+             GROUP BY TRIM(supplierName)
+             ORDER BY total DESC
+-        `);
++        `, a.params);
+ 
+         res.json({ trend, supplierSpend });
+     } catch (e) {
+@@ -943,8 +1013,9 @@
+ 
+ app.get('/api/dashboard/inflow', (req, res) => {
+     try {
++        const aI = andSite(req, 'i');
+         const rows = dbApi.all(`
+-            SELECT 
++            SELECT
+                 r.id,
+                 r.qty,
+                 r.deliveryDate,
+@@ -957,9 +1028,9 @@
+                 i.vehicleMachinery
+             FROM receipts r
+             JOIN items i ON r.itemId = i.id
+-            WHERE r.qty > 0 AND TRIM(COALESCE(r.deliveryDateISO, '')) != ''
++            WHERE r.qty > 0 AND TRIM(COALESCE(r.deliveryDateISO, '')) != ''${aI.sql}
+             ORDER BY r.deliveryDateISO DESC, r.id DESC
+-        `);
++        `, aI.params);
+ 
+         // Group them inside backend JS to preserve exact frontend nested structures
+         const dailyData = {};
+@@ -1036,10 +1107,10 @@
+                 COALESCE((SELECT SUM(qty) FROM receipts r WHERE r.itemId = i.id), 0) AS recQty
+             FROM items i
+             WHERE i.reqQty > (SELECT COALESCE(SUM(qty), 0) FROM receipts r WHERE r.itemId = i.id)
+-              AND TRIM(COALESCE(i.reqDateISO, '')) != '' 
+-              AND i.reqDateISO < ?
++              AND TRIM(COALESCE(i.reqDateISO, '')) != ''
++              AND i.reqDateISO < ?${andSite(req, 'i').sql}
+             ORDER BY i.reqDateISO DESC, i.id DESC
+-        `, [today]);
++        `, [today, ...andSite(req, 'i').params]);
+         res.json(rows);
+     } catch (e) {
+         res.status(500).json({ error: e.message });
+@@ -1048,11 +1119,12 @@
+ 
+ app.get('/api/dashboard/transfers-timeline', (req, res) => {
+     try {
++        const ws = whereSite(req);
+         const rows = dbApi.all(`
+-            SELECT * FROM material_transfers
++            SELECT * FROM material_transfers${ws.sql}
+             ORDER BY transferDateISO DESC, id DESC
+             LIMIT 5
+-        `);
++        `, ws.params);
+         res.json(rows);
+     } catch (e) {
+         res.status(500).json({ error: e.message });
+@@ -1061,12 +1133,13 @@
+ 
+ app.get('/api/all-vehicles', (req, res) => {
+     try {
++        const a = andSite(req);
+         const rows = dbApi.all(`
+-            SELECT DISTINCT TRIM(vehicleMachinery) AS vehicle 
+-            FROM items 
+-            WHERE TRIM(COALESCE(vehicleMachinery, '')) != '' 
++            SELECT DISTINCT TRIM(vehicleMachinery) AS vehicle
++            FROM items
++            WHERE TRIM(COALESCE(vehicleMachinery, '')) != ''${a.sql}
+             ORDER BY vehicle COLLATE NOCASE
+-        `);
++        `, a.params);
+         res.json(rows.map(r => r.vehicle));
+     } catch (e) {
+         res.status(500).json({ error: e.message });
+@@ -1075,12 +1148,13 @@
+ 
+ app.get('/api/all-categories', (req, res) => {
+     try {
++        const a = andSite(req);
+         const rows = dbApi.all(`
+-            SELECT DISTINCT TRIM(category) AS category 
+-            FROM items 
+-            WHERE TRIM(COALESCE(category, '')) != '' 
++            SELECT DISTINCT TRIM(category) AS category
++            FROM items
++            WHERE TRIM(COALESCE(category, '')) != ''${a.sql}
+             ORDER BY category COLLATE NOCASE
+-        `);
++        `, a.params);
+         res.json(rows.map(r => r.category));
+     } catch (e) {
+         res.status(500).json({ error: e.message });
+@@ -1098,6 +1172,12 @@
+         const sort = req.query.sort || 'itemName';
+         const order = (req.query.order || 'asc').toLowerCase() === 'desc' ? 'DESC' : 'ASC';
+ 
++        // Site scope lives inside the shared `cte`, so every query built from it carries
++        // these params first (received_totals uses i.*, issued_totals uses the bare column).
++        const aI = andSite(req, 'i');
++        const aBare = andSite(req);
++        const cteParams = [...aI.params, ...aBare.params];
++
+         const params = [];
+         const whereClauses = [];
+ 
+@@ -1125,13 +1205,13 @@
+                 SELECT LOWER(TRIM(i.itemName)) AS cleanName, MAX(i.itemName) AS itemName, MAX(i.category) AS category, SUM(r.qty) AS totalReceived
+                 FROM items i
+                 JOIN receipts r ON r.itemId = i.id
+-                WHERE r.qty > 0
++                WHERE r.qty > 0${aI.sql}
+                 GROUP BY LOWER(TRIM(i.itemName))
+             ),
+             issued_totals AS (
+                 SELECT LOWER(TRIM(itemName)) AS cleanName, MAX(itemName) AS itemName, MAX(category) AS category, SUM(qty) AS totalIssued
+                 FROM issues
+-                WHERE qty > 0
++                WHERE qty > 0${aBare.sql}
+                 GROUP BY LOWER(TRIM(itemName))
+             ),
+             all_names AS (
+@@ -1161,25 +1241,25 @@
+ 
+         // Get total count matching filters
+         const countRow = dbApi.get(`
+-            \${cte}
++            ${cte}
+             SELECT COUNT(*) AS c FROM inventory_base
+-            \${whereSql}
+-        `, params);
++            ${whereSql}
++        `, [...cteParams, ...params]);
+         const total = countRow.c;
+ 
+         // Get paginated and sorted items
+         const skip = (page - 1) * limit;
+         const items = dbApi.all(`
+-            \${cte}
++            ${cte}
+             SELECT * FROM inventory_base
+-            \${whereSql}
+-            ORDER BY \${sortCol} \${order}
++            ${whereSql}
++            ORDER BY ${sortCol} ${order}
+             LIMIT ? OFFSET ?
+-        `, [...params, limit, skip]);
++        `, [...cteParams, ...params, limit, skip]);
+ 
+         // Get dynamic KPIs over the entire list
+         const kpis = dbApi.get(`
+-            \${cte}
++            ${cte}
+             SELECT 
+                 COUNT(*) AS totalSKUs,
+                 SUM(CASE WHEN status = 'instock' THEN 1 ELSE 0 END) AS inStock,
+@@ -1187,15 +1267,15 @@
+                 SUM(CASE WHEN status = 'outstock' THEN 1 ELSE 0 END) AS outOfStock,
+                 SUM(CASE WHEN status = 'anomaly' THEN 1 ELSE 0 END) AS discrepancies
+             FROM inventory_base
+-        `);
++        `, cteParams);
+ 
+         // Compute dynamic counts per category for the chips (over the entire base list)
+         const categoryCounts = dbApi.all(`
+-            \${cte}
++            ${cte}
+             SELECT category, COUNT(*) AS count
+             FROM inventory_base
+             GROUP BY category
+-        `);
++        `, cteParams);
+ 
+         res.json({
+             items,
+@@ -1220,10 +1300,12 @@
+     try {
+         const cleanName = s(req.query.cleanName).trim().toLowerCase();
+         if (!cleanName) return res.status(400).json({ error: 'cleanName is required' });
++        const aI = andSite(req, 'i');
++        const a = andSite(req);
+ 
+         // Get receipts
+         const receipts = dbApi.all(`
+-            SELECT 
++            SELECT
+                 r.qty,
+                 r.deliveryDate,
+                 r.purchaseSource,
+@@ -1235,13 +1317,13 @@
+                 i.vehicleMachinery
+             FROM receipts r
+             JOIN items i ON r.itemId = i.id
+-            WHERE LOWER(TRIM(i.itemName)) = ?
++            WHERE LOWER(TRIM(i.itemName)) = ?${aI.sql}
+             ORDER BY r.deliveryDateISO DESC, r.id DESC
+-        `, [cleanName]);
++        `, [cleanName, ...aI.params]);
+ 
+         // Get issues
+         const issues = dbApi.all(`
+-            SELECT 
++            SELECT
+                 qty,
+                 issueDate,
+                 mrnNum,
+@@ -1250,16 +1332,16 @@
+                 issuedBy,
+                 notes
+             FROM issues
+-            WHERE LOWER(TRIM(itemName)) = ?
++            WHERE LOWER(TRIM(itemName)) = ?${a.sql}
+             ORDER BY issueDateISO DESC, id DESC
+-        `, [cleanName]);
++        `, [cleanName, ...a.params]);
+ 
+         const linkedItem = dbApi.get(`
+             SELECT id, itemName, category
+             FROM items
+-            WHERE LOWER(TRIM(itemName)) = ?
++            WHERE LOWER(TRIM(itemName)) = ?${a.sql}
+             LIMIT 1
+-        `, [cleanName]);
++        `, [cleanName, ...a.params]);
+ 
+         res.json({ receipts, issues, linkedItem });
+     } catch (e) {
+@@ -1278,6 +1360,7 @@
+         const limit = parseInt(req.query.limit) || null;
+         const where = [];
+         const params = [];
++        { const sc = scopeWhere(req); if (sc.cond) { where.push(sc.cond); params.push(...sc.params); } }
+ 
+         if (req.query.search) {
+             const like = `%${req.query.search}%`;
+@@ -1325,8 +1408,8 @@
+                 COUNT(*) AS total,
+                 COALESCE(SUM(qty), 0) AS totalQty,
+                 COUNT(CASE WHEN transferDateISO >= ? THEN 1 END) AS thisMonth
+-            FROM material_transfers
+-        `, [startOfMonth]);
++            FROM material_transfers${whereSite(req).sql}
++        `, [startOfMonth, ...whereSite(req).params]);
+         res.json(stats);
+     } catch (e) {
+         res.status(500).json({ error: e.message });
+@@ -1336,7 +1419,8 @@
+ app.get('/api/transfers/:id', (req, res) => {
+     try {
+         const id = parseInt(req.params.id);
+-        const transfer = dbApi.get(`SELECT * FROM material_transfers WHERE id = ?`, [id]);
++        const a = andSite(req);
++        const transfer = dbApi.get(`SELECT * FROM material_transfers WHERE id = ?${a.sql}`, [id, ...a.params]);
+         if (!transfer) return res.status(404).json({ error: 'Transfer not found' });
+         res.json(transfer);
+     } catch (e) {
+@@ -1389,7 +1473,7 @@
+     }
+ });
+ 
+-app.delete('/api/transfers/:id', verifyDeletePassword, (req, res) => {
++app.delete('/api/transfers/:id', ...requireAuthPerm('STORES.DELETE'), (req, res) => {
+     try {
+         const id = parseInt(req.params.id);
+         dbApi.run(`DELETE FROM material_transfers WHERE id = ?`, [id]);
+@@ -1407,7 +1491,8 @@
+     try {
+         const where = [];
+         const params = [];
+-        
++        { const sc = scopeWhere(req, 'gi'); if (sc.cond) { where.push(sc.cond); params.push(...sc.params); } }
++
+         if (req.query.search) {
+             const like = `%${req.query.search}%`;
+             where.push(`(gi.itemName LIKE ? OR gi.partNumber LIKE ? OR gi.specification LIKE ? OR gi.notes LIKE ?)`);
+@@ -1455,6 +1540,8 @@
+ 
+ app.get('/api/general-items/stats', (req, res) => {
+     try {
++        const wsGi = whereSite(req, 'gi');
++        const wsB = whereSite(req);
+         const stats = dbApi.get(`
+             WITH item_stocks AS (
+                 SELECT gi.id, gi.minStock,
+@@ -1465,19 +1552,19 @@
+                     ORDER BY txDateISO DESC, id DESC
+                     LIMIT 1
+                 ), 0) AS currentStock
+-                FROM general_items gi
++                FROM general_items gi${wsGi.sql}
+             )
+             SELECT
+-                (SELECT COUNT(*) FROM general_items) AS totalSKUs,
++                (SELECT COUNT(*) FROM general_items${wsB.sql}) AS totalSKUs,
+                 (SELECT COUNT(*) FROM item_stocks WHERE currentStock <= 0) AS outOfStock,
+                 (SELECT COUNT(*) FROM item_stocks WHERE currentStock <= minStock AND currentStock > 0) AS lowStock,
+-                (SELECT COUNT(*) FROM general_item_transactions) AS totalTransactions
+-        `);
++                (SELECT COUNT(*) FROM general_item_transactions${wsB.sql}) AS totalTransactions
++        `, [...wsGi.params, ...wsB.params, ...wsB.params]);
+         const rackCounts = dbApi.all(`
+             SELECT rackNumber, COUNT(*) AS count
+-            FROM general_items
++            FROM general_items${wsB.sql}
+             GROUP BY rackNumber
+-        `);
++        `, wsB.params);
+         res.json({
+             totalSKUs: stats.totalSKUs || 0,
+             outOfStock: stats.outOfStock || 0,
+@@ -1492,12 +1579,13 @@
+ 
+ app.get('/api/general-items/racks', (req, res) => {
+     try {
++        const a = andSite(req);
+         const rows = dbApi.all(`
+             SELECT DISTINCT TRIM(rackNumber) AS r
+             FROM general_items
+-            WHERE TRIM(COALESCE(rackNumber, '')) != ''
++            WHERE TRIM(COALESCE(rackNumber, '')) != ''${a.sql}
+             ORDER BY r
+-        `);
++        `, a.params);
+         res.json(rows.map(row => row.r));
+     } catch (e) {
+         res.status(500).json({ error: e.message });
+@@ -1506,12 +1594,13 @@
+ 
+ app.get('/api/general-items/subcategories', (req, res) => {
+     try {
++        const a = andSite(req);
+         const rows = dbApi.all(`
+             SELECT DISTINCT TRIM(category) AS cat
+             FROM general_items
+-            WHERE TRIM(COALESCE(category, '')) != ''
++            WHERE TRIM(COALESCE(category, '')) != ''${a.sql}
+             ORDER BY cat
+-        `);
++        `, a.params);
+         res.json(rows.map(row => row.cat));
+     } catch (e) {
+         res.status(500).json({ error: e.message });
+@@ -1521,7 +1610,8 @@
+ app.get('/api/general-items/:id', (req, res) => {
+     try {
+         const id = parseInt(req.params.id);
+-        const item = dbApi.get(`SELECT * FROM general_items WHERE id = ?`, [id]);
++        const a = andSite(req);
++        const item = dbApi.get(`SELECT * FROM general_items WHERE id = ?${a.sql}`, [id, ...a.params]);
+         if (!item) return res.status(404).json({ error: 'General Item not found' });
+         
+         item.currentStock = dbApi.get(`
+@@ -1601,7 +1691,7 @@
+     }
+ });
+ 
+-app.delete('/api/general-items/:id', verifyDeletePassword, (req, res) => {
++app.delete('/api/general-items/:id', ...requireAuthPerm('STORES.DELETE'), (req, res) => {
+     try {
+         const id = parseInt(req.params.id);
+         dbApi.transaction(() => {
+@@ -1738,12 +1828,15 @@
+ // ===========================================================================
+ app.get('/api/export/excel', (req, res) => {
+     try {
+-        const items = dbApi.all(`SELECT * FROM items`);
+-        const receipts = dbApi.all(`SELECT * FROM receipts`);
+-        const issues = dbApi.all(`SELECT * FROM issues ORDER BY issueDateISO DESC`);
+-        const batteries = dbApi.all(`SELECT * FROM batteries ORDER BY serialNumber COLLATE NOCASE ASC`);
+-        const batteryMovements = dbApi.all(`SELECT bm.*, b.serialNumber, b.itemName FROM battery_movements bm JOIN batteries b ON bm.batteryId = b.id ORDER BY bm.movementDateISO DESC, bm.id DESC`);
+-        const transfers = dbApi.all(`SELECT * FROM material_transfers ORDER BY transferDateISO DESC, id DESC`);
++        // Export is a bulk read — scope it to the caller's site(s) like every other read.
++        const ws = whereSite(req);
++        const wsB = whereSite(req, 'b');
++        const items = dbApi.all(`SELECT * FROM items${ws.sql}`, ws.params);
++        const receipts = dbApi.all(`SELECT * FROM receipts${ws.sql}`, ws.params);
++        const issues = dbApi.all(`SELECT * FROM issues${ws.sql} ORDER BY issueDateISO DESC`, ws.params);
++        const batteries = dbApi.all(`SELECT * FROM batteries${ws.sql} ORDER BY serialNumber COLLATE NOCASE ASC`, ws.params);
++        const batteryMovements = dbApi.all(`SELECT bm.*, b.serialNumber, b.itemName FROM battery_movements bm JOIN batteries b ON bm.batteryId = b.id${wsB.sql} ORDER BY bm.movementDateISO DESC, bm.id DESC`, wsB.params);
++        const transfers = dbApi.all(`SELECT * FROM material_transfers${ws.sql} ORDER BY transferDateISO DESC, id DESC`, ws.params);
+ 
+         const byItem = {};
+         for (const r of receipts) (byItem[r.itemId] = byItem[r.itemId] || []).push(r);
